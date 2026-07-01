@@ -91,8 +91,7 @@ convention. Human break-glass for a deliberate manual merge: `ALLOW_DIRECT_MERGE
 
 **The task↔branch binding is the branch name.** Name branches
 `feature/<taskid>-<slug>`; `land.py` parses the task id out of it and marks that task
-done on a green merge — no flag to remember. It's tied to the **branch name, not a
-worktree** (we run branch-per-task in one checkout while sequential).
+done on a green merge — no flag to remember. It's tied to the **branch name**.
 
 ```bash
 python3 scripts/land.py feature/t1-dataset        # derives t1 from the branch, marks it done
@@ -120,7 +119,7 @@ python3 scripts/review.py --base main     # review main..HEAD
 ```bash
 python3 scripts/task.py next                       # see what's up
 python3 scripts/task.py start t1                    # claim it (single-writer)
-git checkout -b feature/t1-dataset                  # branch per task (no worktree needed while sequential)
+git checkout -b feature/t1-dataset                  # branch per task (one checkout, sequential)
 python3 scripts/log.py "t1 started — plan: ..."     # note the plan
 # ... write code + its test; commit (pre-commit hook runs check_all) ...
 git checkout main
