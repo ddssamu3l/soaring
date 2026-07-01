@@ -93,9 +93,16 @@ convention. Human break-glass for a deliberate manual merge: `ALLOW_DIRECT_MERGE
 `feature/<taskid>-<slug>`; `land.py` parses the task id out of it and marks that task
 done on a green merge — no flag to remember. It's tied to the **branch name**.
 
+**Publishing is default-deny (`--greenlit`).** Landing moves main *and pushes to the
+public repo* — the one irreversible, outward-facing action, and the only guardrail no git
+hook enforces. So `land.py` self-denies: it **aborts unless greenlit** — pass `--greenlit`,
+or run it yourself in a terminal and answer `y`. An agent in a captured subprocess gets no
+TTY, so a reflexive "finish the loop" land aborts instead of publishing. Pass `--greenlit`
+**only after the user's explicit go**.
+
 ```bash
-python3 scripts/land.py feature/t1-dataset        # derives t1 from the branch, marks it done
-python3 scripts/land.py my-branch --task t1        # override when the branch can't follow the convention
+python3 scripts/land.py feature/t1-dataset --greenlit   # derives t1, marks it done; publishes only with the flag
+python3 scripts/land.py my-branch --task t1 --greenlit    # override task binding for off-convention branches
 ```
 
 On success it merges, pushes (best-effort), and runs `task.py done t1 --commit <sha>`.
@@ -107,6 +114,13 @@ Risk-tiered panel (correctness / ml-integrity / quality / **docs**) + a coordina
 that biases toward approval. The **ml-integrity** reviewer guards the sensor firewall
 and silent-ML failures; the **docs** reviewer fires whenever a `scripts/*.py` changes and
 checks the docs actually match the code. Break-glass: `BREAK_GLASS=1`.
+
+**Cost / offline note.** The judge shells out to the `claude` CLI, so it uses your Claude
+**subscription** (effectively $0 marginal — the "t1–t7 ~$0" framing is about *compute*, not
+tooling) and needs `claude` on PATH + network. That adds no new constraint on landing, which
+already needs network to *push*. If `claude` is unavailable and you still must land,
+`BREAK_GLASS=1` skips the judge (human override) — otherwise a failed review rolls the merge
+back.
 
 ```bash
 python3 scripts/review.py --base main     # review main..HEAD
@@ -123,7 +137,7 @@ git checkout -b feature/t1-dataset                  # branch per task (one check
 python3 scripts/log.py "t1 started — plan: ..."     # note the plan
 # ... write code + its test; commit (pre-commit hook runs check_all) ...
 git checkout main
-python3 scripts/land.py feature/t1-dataset --task t1   # gate + review + merge + mark done
+python3 scripts/land.py feature/t1-dataset --greenlit   # ONLY on the user's go: gate + review + merge + mark done
 ```
 
 ## What you can rely on to exist

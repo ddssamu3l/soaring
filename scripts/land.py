@@ -26,8 +26,14 @@ Usage (run from the checkout, on a clean main):
     python scripts/land.py feature/t1-dataset      # derives + marks t1 done
     python scripts/land.py my-branch --task t1      # explicit task binding
 
+Publishing is default-DENY: land aborts unless greenlit (--greenlit, or an interactive
+'y' from a human at a TTY). Landing pushes to the PUBLIC repo — the one irreversible,
+outward-facing action, and the only guardrail no git hook enforces — so this confirm is
+the backstop against an un-approved land. An agent in a captured subprocess gets no TTY,
+so a reflexive "finish the loop" land aborts; pass --greenlit only on the user's go.
+
 The loop: task.py start -> git checkout -b feature/<taskid>-<slug> -> commit
-(pre-commit runs check_all) -> git checkout main -> land.py.
+(pre-commit runs check_all) -> git checkout main -> land.py --greenlit.
 """
 
 from __future__ import annotations
@@ -66,6 +72,21 @@ def out(args: list[str]) -> str:
 def fail(msg: str) -> int:
     print(f"\033[31mland: {msg}\033[0m", file=sys.stderr)
     return 1
+
+
+def _greenlit(branch: str, flag: bool) -> bool:
+    """Publishing is default-DENY. Every OTHER guardrail here is enforced by a git hook;
+    this one can't be (land pushes to the PUBLIC repo — an irreversible, outward-facing act
+    a hook doesn't gate). So proceed only on an explicit greenlight: the --greenlit flag, or
+    an interactive 'y' from a human at a TTY. An agent running land.py in a captured
+    subprocess has neither → a reflexive land aborts instead of publishing. Passing
+    --greenlit is then a deliberate, visible act (the user's go) — the same
+    bypass-is-visible property the ALLOW_* overrides give the other gates."""
+    if flag:
+        return True
+    if sys.stdin.isatty():
+        return input(f"Publish {branch} to the PUBLIC main? [y/N] ").strip().lower() == "y"
+    return False
 
 
 def land(branch: str, task: str | None = None) -> int:
@@ -163,7 +184,22 @@ def main() -> int:
         "--task",
         help="task_list.json task id to mark done on a successful land (e.g. t2)",
     )
+    ap.add_argument(
+        "--greenlit",
+        action="store_true",
+        help="confirm publishing to the PUBLIC repo (required unless run interactively at a "
+        "TTY); pass ONLY after the user's explicit go",
+    )
     args = ap.parse_args()
+
+    # Publish-ask backstop: refuse to move/push main without an explicit greenlight. This is
+    # the one guardrail no hook enforces, so land itself default-denies (see _greenlit).
+    if not _greenlit(args.branch, args.greenlit):
+        return fail(
+            "publishing is default-deny — land pushes to the PUBLIC repo.\n"
+            "  Re-run with --greenlit ONLY after the user's explicit go, or run it\n"
+            "  yourself in a terminal and answer 'y'. (This abort IS the publish-ask.)"
+        )
 
     # Authorize our own merge past the pre-merge-commit guard (.githooks/pre-merge-commit),
     # which refuses any un-sanctioned `git merge` into main. Set process-wide so every
