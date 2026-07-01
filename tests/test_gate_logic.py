@@ -69,3 +69,11 @@ def test_land_sets_the_merge_sentinel() -> None:
     # sentinel the hook checks for.
     land = (REPO / "scripts" / "land.py").read_text()
     assert 'LAND_ACTIVE"] = "1"' in land, "land.py must set LAND_ACTIVE so its merge passes"
+
+
+def test_land_defaults_to_deny_publishing() -> None:
+    # Publishing is the one guardrail no hook enforces; land must self-deny without a
+    # greenlight so a reflexive land in a captured subprocess aborts instead of pushing.
+    land = (REPO / "scripts" / "land.py").read_text()
+    assert "--greenlit" in land, "land.py must expose a --greenlit publish confirmation"
+    assert "def _greenlit" in land, "land.py must default-deny publishing (see _greenlit)"
