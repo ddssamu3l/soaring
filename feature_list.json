@@ -1,0 +1,85 @@
+{
+  "tasks": [
+    {
+      "id": "t1",
+      "title": "Log a dataset from the sim",
+      "status": "pending",
+      "deps": [],
+      "files": ["data_gen.py"],
+      "commit": null,
+      "notes": "Many rollouts, randomized bank angles; save (state, action, next_state). Sim becomes the data factory. YOU ARE HERE."
+    },
+    {
+      "id": "t2",
+      "title": "Rung 1 — predict next state (MLP) + the keystone plot",
+      "status": "pending",
+      "deps": ["t1"],
+      "files": ["train.py"],
+      "commit": null,
+      "notes": "MSE (state,action)->next_state. Free-running vs teacher-forced error vs horizon = the go/no-go gate. Zero papers."
+    },
+    {
+      "id": "t3",
+      "title": "Add a planner (CEM/MPC) + navigate to a goal",
+      "status": "pending",
+      "deps": ["t2"],
+      "files": ["planner.py"],
+      "commit": null,
+      "notes": "Task = reach a goal (not endurance — that's the reactive trap). Two thermals + sink between + goal past the second."
+    },
+    {
+      "id": "t4",
+      "title": "Compare to a reactive baseline — THE EXPERIMENT",
+      "status": "pending",
+      "deps": ["t3"],
+      "files": [],
+      "commit": null,
+      "notes": "Reactive 'turn toward lift' vs the planner, same task. Does predicting beat reacting? — the organizing question as a number."
+    },
+    {
+      "id": "t5",
+      "title": "Randomize + evolve the world (POMDP)",
+      "status": "pending",
+      "deps": ["t4"],
+      "files": [],
+      "commit": null,
+      "notes": "Randomized layouts + thermal drift/decay. Encoder gets a short memory window. Build the sensor firewall here."
+    },
+    {
+      "id": "t6",
+      "title": "Rung 2 — the real JEPA (latent prediction)",
+      "status": "pending",
+      "deps": ["t5"],
+      "files": [],
+      "commit": null,
+      "notes": "encode->predict next latent, EMA target + stop-grad + anti-collapse. Papers read just-in-time: BYOL, I-JEPA, V-JEPA2-AC, LeWM. A tie vs rung 1 is NOT failure."
+    },
+    {
+      "id": "t7",
+      "title": "Dynamic soaring (shear layer)",
+      "status": "pending",
+      "deps": ["t6"],
+      "files": [],
+      "commit": null,
+      "notes": "Swap thermal field for a shear layer. Committed trajectory you can't react into — the hard test of plan-through."
+    },
+    {
+      "id": "t8",
+      "title": "(Optional) Vision branch — add the camera",
+      "status": "pending",
+      "deps": ["t7"],
+      "files": [],
+      "commit": null,
+      "notes": "Renderer + vision encoder (ViT/CNN). Does seeing the clouds beat inferring from the trail? Gated behind everything above."
+    },
+    {
+      "id": "t9",
+      "title": "(Optional) Real hardware — RC glider/car, inference only",
+      "status": "pending",
+      "deps": ["t8"],
+      "files": [],
+      "commit": null,
+      "notes": "A second, filmable, real-physics datapoint. Training stays on the Mac. Not needed for the result."
+    }
+  ]
+}

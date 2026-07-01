@@ -25,8 +25,10 @@ worktree for an agent:
 
 from __future__ import annotations
 
+import argparse
 import fcntl
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -36,6 +38,14 @@ import check_all  # sibling in scripts/ (on sys.path); shares the policy logic
 REPO = Path(__file__).resolve().parent.parent
 LOCK = REPO / ".git" / "queue.lock"
 PY = REPO / ".venv" / "bin" / "python"
+
+
+def _task_from_branch(branch: str) -> str | None:
+    """Derive the feature_list task id from the branch name. Convention:
+    `feature/<taskid>-<slug>` (e.g. feature/t1-dataset -> t1). This is what ties a
+    task to a branch — no separate mapping to remember."""
+    m = re.search(r"(?:^|/)(t\d+)(?:-|$)", branch)
+    return m.group(1) if m else None
 
 
 def git(args: list[str], check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -51,7 +61,12 @@ def fail(msg: str) -> int:
     return 1
 
 
-def land(branch: str) -> int:
+def land(branch: str, task: str | None = None) -> int:
+    # task binding: explicit --task wins; else derive it from the branch name.
+    task = task or _task_from_branch(branch)
+    if task:
+        print(f"task binding: {task} (will be marked done on success)")
+
     # 2. preconditions -----------------------------------------------------
     if out(["rev-parse", "--abbrev-ref", "HEAD"]) != "main":
         return fail("primary worktree must be on `main` to land.")
@@ -116,21 +131,39 @@ def land(branch: str) -> int:
         push = git(["push", "origin", "main"], check=False)
         if push.returncode != 0:
             print(f"⚠️  landed locally but push failed:\n{push.stderr.strip()}")
+
+    # 6b. mark the task done programmatically — the state update is a SIDE EFFECT
+    #     of landing, not a thing the agent has to remember. Best-effort: a
+    #     bookkeeping mismatch (e.g. the task wasn't `start`ed) must NEVER undo a
+    #     good merge, so we warn instead of failing.
+    if task:
+        merged = out(["rev-parse", "HEAD"])
+        r = subprocess.run(
+            [sys.executable, str(REPO / "scripts" / "task.py"), "done", task, "--commit", merged],
+            cwd=REPO,
+        )
+        if r.returncode != 0:
+            print(f"⚠️  merged, but couldn't mark {task} done — fix via scripts/task.py.")
+
     print(f"\n\033[32mLANDED\033[0m {branch} → main  ({out(['rev-parse', '--short', 'HEAD'])})")
     return 0
 
 
 def main() -> int:
-    if len(sys.argv) != 2:
-        return fail("usage: python scripts/land.py <branch>")
-    branch = sys.argv[1]
+    ap = argparse.ArgumentParser(prog="land.py")
+    ap.add_argument("branch", help="feature branch to land into main")
+    ap.add_argument(
+        "--task",
+        help="feature_list.json task id to mark done on a successful land (e.g. t2)",
+    )
+    args = ap.parse_args()
 
     LOCK.parent.mkdir(exist_ok=True)
     with open(LOCK, "w") as lockf:
         print("acquiring merge-queue lock …")
         fcntl.flock(lockf, fcntl.LOCK_EX)  # blocks → serializes concurrent lands
         print("lock acquired.\n")
-        return land(branch)
+        return land(args.branch, args.task)
 
 
 if __name__ == "__main__":

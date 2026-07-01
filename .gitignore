@@ -12,3 +12,6 @@ venv/
 
 # local planning / context — NOT part of the public artifact
 CLAUDE.md
+
+# personal Claude Code hook wiring (throwaway probes, machine-local overrides)
+.claude/settings.local.json

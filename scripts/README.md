@@ -1,0 +1,126 @@
+# Agentic toolchain — how to use it
+
+The scaffold that lets agents work on this repo safely. Two layers:
+
+- **Gate + merge** — make bad code un-landable (deterministic gate → AI review → serialized merge).
+- **Durable state** — survive compaction / fresh sessions by keeping truth on disk, not in the context window.
+
+> This file is the reference we'll later distill into `CLAUDE.md` so a fresh Claude
+> knows the conventions and stops tripping avoidable gate errors.
+
+---
+
+## Durable session state (the anti-amnesia layer)
+
+Truth lives in three places: **`feature_list.json`** (structured work order),
+**`progress.txt`** (append-only narrative log), and **git history**. Conversation
+is scratch; these are canonical. A session can die at any point and the next one
+rebuilds full state from them.
+
+### `task.py` — the ONLY way to change `feature_list.json`
+
+Never hand-edit `feature_list.json`. A PreToolUse hook (`guard_state.py`) blocks
+direct Edit/Write of it, so this CLI is the only door. It enforces the invariants
+an LLM would otherwise corrupt: valid JSON, **exactly one `active` task**
+(single-writer), deps satisfied before start, and a **real landed commit required
+to mark done**.
+
+```bash
+python3 scripts/task.py add --title "Log a dataset" --deps t1,t2 --files "data_gen.py" --notes "..."
+python3 scripts/task.py start t2          # -> active   (refuses if another task is active)
+python3 scripts/task.py done  t2 --commit <sha>   # -> done (sha must exist in git)
+python3 scripts/task.py block t2 --reason "sim API changed"
+python3 scripts/task.py list              # status board
+python3 scripts/task.py next              # the next pickable task
+```
+
+Break-glass for a human to hand-edit anyway: `ALLOW_STATE_EDIT=1`.
+
+### `log.py` — append to the narrative log
+
+```bash
+python3 scripts/log.py "t2 started — plan: 2-layer MLP, MSE, keystone plot is the deliverable"
+```
+
+Auto-stamps date + active task + git sha. Append-only, low risk, no hard guard.
+
+### `rehydrate.py` — resume from disk
+
+```bash
+python3 scripts/rehydrate.py     # print the board: active/next task, recent progress, recent commits
+```
+
+Also wired as a **SessionStart hook** (`.claude/settings.json`) so its output is
+injected at the top of every new/compacted session — the session reopens already
+knowing where it is. **The standing convention: at session start, resume the
+ACTIVE (or NEXT) task; mutate state only via `task.py`.**
+
+---
+
+## Gate + merge (the make-bad-code-un-landable layer)
+
+### `check_all.py` — the deterministic gate (runs on every commit via the hook)
+
+9 gates: format, lint, mypy --strict, pytest, **test-presence** (every non-exempt
+`.py` needs `tests/test_<name>.py`), **test-coupling** (edit a file → touch its
+test), **exempt-guard** (adding a `.test-exempt` entry needs `ALLOW_EXEMPT=1`),
+no-todos, file-size. Run it directly anytime:
+
+```bash
+.venv/bin/python scripts/check_all.py
+```
+
+**Conventions to avoid needless gate failures:** write the test file alongside the
+code; run `ruff format` before committing; no `TODO/FIXME/XXX`; keep files < 600
+lines; new non-exempt module ⇒ add `tests/test_<name>.py` (or exempt it, which
+needs a human).
+
+### `land.py` — serialized merge queue (gate + review + state update, atomic)
+
+Merges a feature branch into main behind a lock: re-runs `check_all` on the merged
+result, re-checks coupling/exempt on the merge delta, runs the AI review, and
+**rolls main back on any failure**.
+
+**The task↔branch binding is the branch name.** Name branches
+`feature/<taskid>-<slug>`; `land.py` parses the task id out of it and marks that task
+done on a green merge — no flag to remember. It's tied to the **branch name, not a
+worktree** (we run branch-per-task in one checkout while sequential).
+
+```bash
+python3 scripts/land.py feature/t1-dataset        # derives t1 from the branch, marks it done
+python3 scripts/land.py my-branch --task t1        # override when the branch can't follow the convention
+```
+
+On success it merges, pushes (best-effort), and runs `task.py done t1 --commit <sha>`.
+A bookkeeping mismatch warns but never undoes a good merge.
+
+### `review.py` — the AI reviewer (invoked by `land.py`; can run standalone)
+
+Risk-tiered panel (correctness / ml-integrity / quality) + a coordinator that
+biases toward approval. The **ml-integrity** reviewer guards the sensor firewall
+and silent-ML failures. Break-glass: `BREAK_GLASS=1`.
+
+```bash
+python3 scripts/review.py --base main     # review main..HEAD
+```
+
+---
+
+## The standard task loop (what an agent does)
+
+```bash
+python3 scripts/task.py next                       # see what's up
+python3 scripts/task.py start t1                    # claim it (single-writer)
+git checkout -b feature/t1-dataset                  # branch per task (no worktree needed while sequential)
+python3 scripts/log.py "t1 started — plan: ..."     # note the plan
+# ... write code + its test; commit (pre-commit hook runs check_all) ...
+git checkout main
+python3 scripts/land.py feature/t1-dataset --task t1   # gate + review + merge + mark done
+```
+
+## What you can rely on to exist
+
+- Every commit (yours or an agent's) is gated by `check_all` via the pre-commit hook.
+- Every land re-gates the merge and runs the AI review before main moves.
+- `feature_list.json` can only change through `task.py` (the hook blocks the bypass).
+- A fresh/compacted session is auto-rehydrated from disk at SessionStart.
