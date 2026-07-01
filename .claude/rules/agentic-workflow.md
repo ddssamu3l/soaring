@@ -6,7 +6,8 @@ This is a **tracked** rule (loads every session like CLAUDE.md, but versioned so
 **Mental model.** State lives on disk, NOT the conversation — `task_list.json` (work
 order) + `progress.txt` (narrative log) + git history. Conversation is scratch; a session
 can die anytime and the next resumes from disk. **Single-writer: exactly ONE `active` task
-at a time.** **Branch-per-task in ONE checkout — NO worktrees** (until we go parallel).
+at a time — one branch, one checkout, sequential.** That is the whole model; worktrees are
+not part of it (see "Parallelism" below).
 Layers: deterministic gate (`check_all`) → AI reviewer (`review`) → serialized merge queue
 (`land`) → durable state (`task`/`log`/`rehydrate`).
 
@@ -40,7 +41,16 @@ python3 scripts/log.py "t1 done — <outcome / decision>"
 
 **Task↔branch binding = the BRANCH NAME.** `feature/<taskid>-<slug>` → `land.py` derives
 `tN` and marks it done on a green merge (no flag to remember). `--task tN` overrides for
-off-convention branches. Tied to the branch, NOT a worktree.
+off-convention branches. Tied to the branch name.
+
+**Parallelism (rare — don't reach for it).** The default is sequential single-writer: one
+active task, one branch, one checkout. That covers essentially everything. The *only* case
+that needs a git worktree is two write-sessions running **concurrently** — a deliberate
+exception you set up by hand the first time you actually hit it (there is no standing
+worktree tooling; build it only if it recurs). Your harness will also offer worktrees
+(`Agent isolation:worktree`, ultracode): fine for **read-only** fan-out (explore / research
+/ review that never commits here); **never** for agents that write code — those stay on the
+coordinator's one branch. If you're unsure, you don't need a worktree.
 
 **What's enforced (work WITH it, don't fight it):**
 - **No direct commits to `main`** — the pre-commit hook refuses them; real work goes on a
