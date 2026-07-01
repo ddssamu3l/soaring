@@ -54,6 +54,15 @@ ROLES = {
         "abstraction that will hurt future agents. IGNORE: subjective style, naming bikesheds, "
         "formatting. Only flag things with real maintenance cost. Default to APPROVE."
     ),
+    "docs": (
+        "You are a DOCS-INTEGRITY reviewer. This repo keeps docs in lockstep with the code "
+        "(a doc-coupling gate proves a doc was touched; you prove it's CORRECT). Look ONLY for: "
+        "a behavior / CLI / flag / interface change in this diff whose docs "
+        "(.claude/rules/agentic-workflow.md, scripts/README.md) were NOT updated to match, or "
+        "were updated to describe something the code does NOT do. IGNORE: prose style, typos, "
+        "wording, formatting. If the docs match the code (or there's no doc-relevant code "
+        "change), APPROVE."
+    ),
 }
 
 
@@ -76,10 +85,15 @@ def risk_tier(diff: str) -> list[str]:
     added = sum(1 for ln in diff.splitlines() if ln.startswith("+") and not ln.startswith("+++"))
     files = len(re.findall(r"^\+\+\+ ", diff, re.MULTILINE))
     if added < 10 and files < 2:
-        return ["correctness"]  # trivial → one reviewer
-    if added < 100:
-        return ["correctness", "ml-integrity"]  # small → two
-    return ["correctness", "ml-integrity", "quality"]  # full pipeline
+        roles = ["correctness"]  # trivial → one reviewer
+    elif added < 100:
+        roles = ["correctness", "ml-integrity"]  # small → two
+    else:
+        roles = ["correctness", "ml-integrity", "quality"]  # full pipeline
+    # docs-integrity: whenever a script/CLI changes, verify the docs kept up (see #5)
+    if re.search(r"^\+\+\+ b/scripts/.*\.py", diff, re.MULTILINE):
+        roles.append("docs")
+    return roles
 
 
 def call_claude(prompt: str) -> str:

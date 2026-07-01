@@ -52,8 +52,10 @@ off-convention branches. Tied to the branch, NOT a worktree.
   Change it ONLY via `task.py` (enforces one-active-task, deps, real-commit-for-done).
 - **`land.py`** serializes via a file lock, re-gates the *merged* result + the merge delta,
   runs the AI review, and **rolls main back on ANY failure**.
-- **AI reviewer** has an `ml-integrity` lens guarding the **sensor firewall** (a model must
-  NEVER see a Thermal's true `x0,y0,w_peak,radius` — only `sense()`) + silent-ML.
+- **AI reviewer** (risk-tiered panel via `land`): `ml-integrity` guards the **sensor
+  firewall** (a model must NEVER see a Thermal's true `x0,y0,w_peak,radius` — only
+  `sense()`) + silent-ML; a `docs` lens fires on any `scripts/*.py` change and checks the
+  docs actually match the code (coupling proves a doc was touched; this proves it's right).
 
 **Escape hatches (human break-glass — agents do NOT self-exempt):**
 `ALLOW_EXEMPT=1` add a `.test-exempt` entry · `ALLOW_NO_TEST_UPDATE=1` edit a source without

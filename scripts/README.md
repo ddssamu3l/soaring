@@ -97,9 +97,10 @@ A bookkeeping mismatch warns but never undoes a good merge.
 
 ### `review.py` — the AI reviewer (invoked by `land.py`; can run standalone)
 
-Risk-tiered panel (correctness / ml-integrity / quality) + a coordinator that
-biases toward approval. The **ml-integrity** reviewer guards the sensor firewall
-and silent-ML failures. Break-glass: `BREAK_GLASS=1`.
+Risk-tiered panel (correctness / ml-integrity / quality / **docs**) + a coordinator
+that biases toward approval. The **ml-integrity** reviewer guards the sensor firewall
+and silent-ML failures; the **docs** reviewer fires whenever a `scripts/*.py` changes and
+checks the docs actually match the code. Break-glass: `BREAK_GLASS=1`.
 
 ```bash
 python3 scripts/review.py --base main     # review main..HEAD
