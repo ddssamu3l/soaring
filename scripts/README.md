@@ -12,14 +12,14 @@ The scaffold that lets agents work on this repo safely. Two layers:
 
 ## Durable session state (the anti-amnesia layer)
 
-Truth lives in three places: **`feature_list.json`** (structured work order),
+Truth lives in three places: **`task_list.json`** (structured work order),
 **`progress.txt`** (append-only narrative log), and **git history**. Conversation
 is scratch; these are canonical. A session can die at any point and the next one
 rebuilds full state from them.
 
-### `task.py` — the ONLY way to change `feature_list.json`
+### `task.py` — the ONLY way to change `task_list.json`
 
-Never hand-edit `feature_list.json`. A PreToolUse hook (`guard_state.py`) blocks
+Never hand-edit `task_list.json`. A PreToolUse hook (`guard_state.py`) blocks
 direct Edit/Write of it, so this CLI is the only door. It enforces the invariants
 an LLM would otherwise corrupt: valid JSON, **exactly one `active` task**
 (single-writer), deps satisfied before start, and a **real landed commit required
@@ -61,10 +61,11 @@ ACTIVE (or NEXT) task; mutate state only via `task.py`.**
 
 ### `check_all.py` — the deterministic gate (runs on every commit via the hook)
 
-9 gates: format, lint, mypy --strict, pytest, **test-presence** (every non-exempt
+11 gates: format, lint, mypy --strict, pytest, **test-presence** (every non-exempt
 `.py` needs `tests/test_<name>.py`), **test-coupling** (edit a file → touch its
 test), **exempt-guard** (adding a `.test-exempt` entry needs `ALLOW_EXEMPT=1`),
-no-todos, file-size. Run it directly anytime:
+**doc-coupling** (a `scripts/*.py` change must touch a doc), **docs-generated**
+(the generated CLI reference isn't stale), no-todos, file-size. Run it directly anytime:
 
 ```bash
 .venv/bin/python scripts/check_all.py
@@ -122,5 +123,5 @@ python3 scripts/land.py feature/t1-dataset --task t1   # gate + review + merge +
 
 - Every commit (yours or an agent's) is gated by `check_all` via the pre-commit hook.
 - Every land re-gates the merge and runs the AI review before main moves.
-- `feature_list.json` can only change through `task.py` (the hook blocks the bypass).
+- `task_list.json` can only change through `task.py` (the hook blocks the bypass).
 - A fresh/compacted session is auto-rehydrated from disk at SessionStart.

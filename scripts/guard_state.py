@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""guard_state.py -- PreToolUse hook: block direct Edit/Write of feature_list.json.
+"""guard_state.py -- PreToolUse hook: block direct Edit/Write of task_list.json.
 
 The state file may only change through scripts/task.py, which enforces the
 invariants (valid JSON, one active task, deps satisfied, real commit for done).
@@ -18,7 +18,7 @@ import os
 import sys
 from pathlib import Path
 
-GUARDED = "feature_list.json"
+GUARDED = "task_list.json"
 
 
 def main() -> int:

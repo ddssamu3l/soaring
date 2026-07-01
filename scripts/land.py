@@ -41,7 +41,7 @@ PY = REPO / ".venv" / "bin" / "python"
 
 
 def _task_from_branch(branch: str) -> str | None:
-    """Derive the feature_list task id from the branch name. Convention:
+    """Derive the task_list task id from the branch name. Convention:
     `feature/<taskid>-<slug>` (e.g. feature/t1-dataset -> t1). This is what ties a
     task to a branch — no separate mapping to remember."""
     m = re.search(r"(?:^|/)(t\d+)(?:-|$)", branch)
@@ -154,7 +154,7 @@ def main() -> int:
     ap.add_argument("branch", help="feature branch to land into main")
     ap.add_argument(
         "--task",
-        help="feature_list.json task id to mark done on a successful land (e.g. t2)",
+        help="task_list.json task id to mark done on a successful land (e.g. t2)",
     )
     args = ap.parse_args()
 

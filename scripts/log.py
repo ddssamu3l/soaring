@@ -20,7 +20,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 PROGRESS = REPO / "progress.txt"
-STATE = REPO / "feature_list.json"
+STATE = REPO / "task_list.json"
 
 
 def _active() -> str:

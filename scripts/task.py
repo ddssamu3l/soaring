@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""task.py -- the ONLY sanctioned way to mutate feature_list.json.
+"""task.py -- the ONLY sanctioned way to mutate task_list.json.
 
 Free-editing structured state with an LLM eventually corrupts it: malformed
 JSON, two tasks marked active, deps skipped, a task "done" with no real commit.
 So we do the same thing we do for code -- don't trust the agent to hold the
 invariant, build a tool that enforces it. A PreToolUse hook (guard_state.py)
-blocks direct Edit/Write of feature_list.json, so this CLI is the only door in.
+blocks direct Edit/Write of task_list.json, so this CLI is the only door in.
 
 Pure stdlib on purpose: hooks and land.py call it, and it must never depend on
 the project venv.
@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Any
 
 REPO = Path(__file__).resolve().parent.parent
-STATE = REPO / "feature_list.json"
+STATE = REPO / "task_list.json"
 
 
 def _load() -> dict[str, Any]:

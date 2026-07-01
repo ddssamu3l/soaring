@@ -8,7 +8,7 @@ Two uses:
     after compaction the session reopens already knowing where it is.
 
 The design principle: conversation is scratch, disk is truth. This is the read
-side of that -- feature_list.json + progress.txt + git history, distilled.
+side of that -- task_list.json + progress.txt + git history, distilled.
 Pure stdlib; runs under any python3.
 """
 
@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 REPO = Path(__file__).resolve().parent.parent
-STATE = REPO / "feature_list.json"
+STATE = REPO / "task_list.json"
 PROGRESS = REPO / "progress.txt"
 
 
@@ -72,7 +72,7 @@ def build() -> str:
         for t in by["blocked"]:
             out.append(f"BLOCKED → {t['id']}: {t['title']}  ({t['notes']})")
     else:
-        out.append("\n(no feature_list.json yet)")
+        out.append("\n(no task_list.json yet)")
 
     prog = _tail(PROGRESS, 8)
     if prog:

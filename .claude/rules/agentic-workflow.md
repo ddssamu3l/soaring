@@ -3,7 +3,7 @@
 This is a **tracked** rule (loads every session like CLAUDE.md, but versioned so a
 `check_all` gate keeps it in sync with the scripts). Full reference: `scripts/README.md`.
 
-**Mental model.** State lives on disk, NOT the conversation — `feature_list.json` (work
+**Mental model.** State lives on disk, NOT the conversation — `task_list.json` (work
 order) + `progress.txt` (narrative log) + git history. Conversation is scratch; a session
 can die anytime and the next resumes from disk. **Single-writer: exactly ONE `active` task
 at a time.** **Branch-per-task in ONE checkout — NO worktrees** (until we go parallel).
@@ -48,7 +48,7 @@ off-convention branches. Tied to the branch, NOT a worktree.
   doc-coupling, docs-generated. Avoid needless failures: write the test file alongside the
   code, `ruff format` first, no `TODO/FIXME/XXX`, files < 600 lines, new non-exempt `.py` ⇒
   `tests/test_<name>.py`, and **regenerate docs after changing a CLI** (`gen_docs.py`).
-- **`feature_list.json` is edit-locked** — a PreToolUse hook blocks direct Edit/Write.
+- **`task_list.json` is edit-locked** — a PreToolUse hook blocks direct Edit/Write.
   Change it ONLY via `task.py` (enforces one-active-task, deps, real-commit-for-done).
 - **`land.py`** serializes via a file lock, re-gates the *merged* result + the merge delta,
   runs the AI review, and **rolls main back on ANY failure**.
@@ -57,7 +57,7 @@ off-convention branches. Tied to the branch, NOT a worktree.
 
 **Escape hatches (human break-glass — agents do NOT self-exempt):**
 `ALLOW_EXEMPT=1` add a `.test-exempt` entry · `ALLOW_NO_TEST_UPDATE=1` edit a source without
-its test · `ALLOW_STATE_EDIT=1` hand-edit `feature_list.json` · `ALLOW_NO_DOC_UPDATE=1`
+its test · `ALLOW_STATE_EDIT=1` hand-edit `task_list.json` · `ALLOW_NO_DOC_UPDATE=1`
 change a script without touching docs · `BREAK_GLASS=1` force-approve the AI review.
 
 **Guarantees you can rely on:** every commit is gated; every land re-gates + AI-reviews
