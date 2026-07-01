@@ -25,17 +25,16 @@ git checkout -b feature/t1-dataset                # branch NAME carries the task
 python3 scripts/log.py "t1 started — plan: ..."
 #   ... write the code AND its test; git commit  (pre-commit hook runs check_all) ...
 git checkout main
-python3 scripts/land.py feature/t1-dataset --greenlit   # ONLY after the user's go: gate + review + merge
+python3 scripts/land.py feature/t1-dataset        # serialize + gate + review + merge; marks t1 done
 python3 scripts/log.py "t1 done — <outcome / decision>"
 ```
 
 **Commit freely; ask before publishing.** Feature-branch commits are pre-authorized —
 local, reversible, they never touch main — so commit as you work (that's what trips the
-pre-commit gate). The ask-gate is `land.py`: it moves main **and pushes to the public repo**.
-This is the ONE guardrail no git hook enforces, so `land.py` itself **default-denies**: it
-aborts unless greenlit (`--greenlit`, or an interactive `y`). Run it — with `--greenlit` —
-**only on the user's explicit go** (they read the diff first). Any other `git push` needs an
-ask too. Rule of thumb: everything up to `land.py` is yours; publishing is the user's call.
+pre-commit gate). The ask-gate is `land.py`: it moves main **and pushes to the public repo**,
+so run it **only on the user's explicit greenlight** (they read the diff first). Any other
+`git push` needs an ask too. Rule of thumb: everything up to `land.py` is yours; publishing
+is the user's call.
 
 **When to use each command** (exact signatures are in the generated block below):
 - `task.py next` / `list` — next pickable / full board (start here).
@@ -79,10 +78,6 @@ coordinator's one branch. If you're unsure, you don't need a worktree.
   only via `land.py`, which sets `LAND_ACTIVE=1`; the repo sets `merge.ff=false` so a
   fast-forward can't dodge the hook). This makes "every merge is judged" a git guarantee,
   not a convention. (Override for a deliberate manual merge: `ALLOW_DIRECT_MERGE=1`.)
-- **Publishing is default-deny** — `land.py` aborts unless greenlit (`--greenlit`, or an
-  interactive `y`). This is the one guardrail a hook *can't* enforce (land pushes to the
-  PUBLIC repo), so land self-denies: a reflexive land in a captured subprocess aborts, and
-  passing `--greenlit` is a deliberate, visible act you take only on the user's go.
 - **AI reviewer** (risk-tiered panel via `land`): `ml-integrity` guards the **sensor
   firewall** (a model must NEVER see a Thermal's true `x0,y0,w_peak,radius` — only
   `sense()`) + silent-ML; a `docs` lens fires on any `scripts/*.py` change and checks the
@@ -118,7 +113,7 @@ usage: task.py list [-h]
 
 usage: task.py next [-h]
 
-usage: land.py [-h] [--task TASK] [--greenlit] branch
+usage: land.py [-h] [--task TASK] branch
 
 usage: review.py [-h] [--base BASE] [--staged]
 
