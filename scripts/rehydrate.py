@@ -92,9 +92,29 @@ def main() -> int:
     ap = argparse.ArgumentParser(
         prog="rehydrate.py", description="Print durable session state from disk."
     )
-    ap.add_argument("--hook", action="store_true", help="SessionStart-hook mode (same output)")
-    ap.parse_args()
-    print(build())
+    ap.add_argument(
+        "--hook",
+        action="store_true",
+        help="SessionStart-hook mode: emit JSON additionalContext for reliable injection",
+    )
+    args = ap.parse_args()
+    board = build()
+    if args.hook:
+        # A SessionStart hook's raw stdout is NOT reliably injected across Claude Code
+        # versions; the documented `additionalContext` form is. Emit that JSON so the
+        # board actually lands in the new session's context.
+        print(
+            json.dumps(
+                {
+                    "hookSpecificOutput": {
+                        "hookEventName": "SessionStart",
+                        "additionalContext": board,
+                    }
+                }
+            )
+        )
+    else:
+        print(board)
     return 0
 
 
