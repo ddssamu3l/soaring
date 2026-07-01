@@ -12,8 +12,10 @@ Layers: deterministic gate (`check_all`) → AI reviewer (`review`) → serializ
 (`land`) → durable state (`task`/`log`/`rehydrate`).
 
 **Session start.** A SessionStart hook auto-runs `rehydrate.py` → injects the board
-(active/next task, recent progress, commits). **Resume the ACTIVE task; if none,
-`task.py next` then `start` it.**
+(active/next task, recent progress, commits). **If a task is ACTIVE, resume it** — a prior
+session died mid-work; picking it up is the whole point of durable state. **If NONE is
+active, surface the next task and wait for the user's go before `start`ing it** — claiming
+new work is a direction call (theirs); resuming interrupted work is not.
 
 **The task loop (do exactly this):**
 ```bash
@@ -26,6 +28,13 @@ git checkout main
 python3 scripts/land.py feature/t1-dataset        # serialize + gate + review + merge; marks t1 done
 python3 scripts/log.py "t1 done — <outcome / decision>"
 ```
+
+**Commit freely; ask before publishing.** Feature-branch commits are pre-authorized —
+local, reversible, they never touch main — so commit as you work (that's what trips the
+pre-commit gate). The ask-gate is `land.py`: it moves main **and pushes to the public repo**,
+so run it **only on the user's explicit greenlight** (they read the diff first). Any other
+`git push` needs an ask too. Rule of thumb: everything up to `land.py` is yours; publishing
+is the user's call.
 
 **When to use each command** (exact signatures are in the generated block below):
 - `task.py next` / `list` — next pickable / full board (start here).

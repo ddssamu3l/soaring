@@ -84,7 +84,10 @@ def build() -> str:
         out.append("\nRecent commits:")
         out += [f"  {ln}" for ln in commits]
 
-    out.append("\nResume the ACTIVE/NEXT task. Mutate state ONLY via scripts/task.py.")
+    out.append(
+        "\nResume an ACTIVE task if one exists; if none, propose the NEXT task and await "
+        "the user's go before starting it. Mutate state ONLY via scripts/task.py."
+    )
     return "\n".join(out)
 
 
