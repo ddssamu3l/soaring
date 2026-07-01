@@ -82,6 +82,13 @@ Merges a feature branch into main behind a lock: re-runs `check_all` on the merg
 result, re-checks coupling/exempt on the merge delta, runs the AI review, and
 **rolls main back on any failure**.
 
+**`land.py` is the ONLY door to main — enforced, not asked.** A raw `git merge` into
+main would bypass the judge *and* `check_all` (the pre-commit hook doesn't fire on
+merges). A `pre-merge-commit` hook refuses any merge into main unless it came from
+`land.py` (which sets `LAND_ACTIVE=1`); the repo also sets `merge.ff = false` so a
+fast-forward can't slip past unhooked. So "merge ⇒ judged" is a git guarantee, not a
+convention. Human break-glass for a deliberate manual merge: `ALLOW_DIRECT_MERGE=1`.
+
 **The task↔branch binding is the branch name.** Name branches
 `feature/<taskid>-<slug>`; `land.py` parses the task id out of it and marks that task
 done on a green merge — no flag to remember. It's tied to the **branch name, not a
@@ -124,6 +131,8 @@ python3 scripts/land.py feature/t1-dataset --task t1   # gate + review + merge +
 
 - Direct commits to `main` are refused by the pre-commit hook — work goes on a
   `feature/<taskid>-<slug>` branch; main advances only via `land.py` (override: `ALLOW_MAIN_COMMIT=1`).
+- Direct `git merge` into `main` is refused by the pre-merge-commit hook — the judge
+  can't be skipped by merging around `land.py` (override: `ALLOW_DIRECT_MERGE=1`).
 - Every commit (yours or an agent's) is gated by `check_all` via the pre-commit hook.
 - Every land re-gates the merge and runs the AI review before main moves.
 - `task_list.json` can only change through `task.py` (the hook blocks the bypass).

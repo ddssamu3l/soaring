@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# pre-merge-commit: the merge counterpart of the pre-commit main-guard.
+#
+# `main` may ONLY be moved by land.py, which merges → runs check_all → runs the AI
+# judge → rolls back on any failure. A raw `git merge <branch>` into main would
+# bypass BOTH the judge AND check_all (the pre-commit hook does NOT fire on merges),
+# silently advancing main with un-judged code. This hook refuses any merge into main
+# that did not originate from land.py, so land.py is the ONLY door to main and
+# "merge ⇒ judged" becomes a git-enforced fact, not a convention an agent must recall.
+#
+# land.py sets LAND_ACTIVE=1 for its own merge, so it passes. Human break-glass for a
+# deliberate manual merge: ALLOW_DIRECT_MERGE=1 git merge ...
+#
+# Coverage note: git fires this hook only when a merge CREATES a commit. The repo sets
+# `merge.ff = false` (a fast-forward would otherwise move main with no commit and dodge
+# every hook), so all merges create a commit and this guard always gets a chance to run.
+set -euo pipefail
+
+BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+if [ "$BRANCH" = "main" ] && [ "${LAND_ACTIVE:-}" != "1" ] && [ "${ALLOW_DIRECT_MERGE:-}" != "1" ]; then
+  echo "pre-merge-commit: refusing a direct merge into main." >&2
+  echo "                  main moves only via the judged merge queue:" >&2
+  echo "                      python3 scripts/land.py <branch>" >&2
+  echo "                  (it runs check_all + the AI review and rolls back on failure)." >&2
+  echo "                  clean up this aborted merge:  git merge --abort" >&2
+  echo "                  human break-glass:            ALLOW_DIRECT_MERGE=1 git merge ..." >&2
+  exit 1
+fi

@@ -50,3 +50,22 @@ def test_hook_resolves_interpreter_from_shared_repo() -> None:
 def test_review_caps_claude_with_a_timeout() -> None:
     review = (REPO / "scripts" / "review.py").read_text()
     assert "timeout=CLAUDE_TIMEOUT" in review, "review.py must pass a timeout to claude"
+
+
+# --- Merge guard: land.py must be the ONLY door to main ------------------
+def test_pre_merge_commit_hook_guards_main() -> None:
+    # A raw `git merge` into main bypasses the judge; the hook must refuse it unless
+    # the merge came from land.py (LAND_ACTIVE) or a human break-glass.
+    hook_path = REPO / ".githooks" / "pre-merge-commit"
+    assert hook_path.exists(), "pre-merge-commit hook missing — main un-guarded against raw merges"
+    hook = hook_path.read_text()
+    assert 'BRANCH" = "main"' in hook, "hook must only guard merges into main"
+    assert "LAND_ACTIVE" in hook, "hook must recognize land.py's sentinel"
+    assert "exit 1" in hook, "hook must actually refuse (non-zero exit) an un-sanctioned merge"
+
+
+def test_land_sets_the_merge_sentinel() -> None:
+    # land.py's own merge has to pass the pre-merge-commit guard, so it must set the
+    # sentinel the hook checks for.
+    land = (REPO / "scripts" / "land.py").read_text()
+    assert 'LAND_ACTIVE"] = "1"' in land, "land.py must set LAND_ACTIVE so its merge passes"
