@@ -43,6 +43,9 @@ python3 scripts/log.py "t1 done — <outcome / decision>"
 off-convention branches. Tied to the branch, NOT a worktree.
 
 **What's enforced (work WITH it, don't fight it):**
+- **No direct commits to `main`** — the pre-commit hook refuses them; real work goes on a
+  `feature/<taskid>-<slug>` branch and reaches main only via `land.py`. (Override for
+  deliberate/bootstrap commits: `ALLOW_MAIN_COMMIT=1`.)
 - **`check_all` on every commit** (pre-commit hook), gates include: format, lint, mypy
   --strict, pytest, test-presence, test-coupling, exempt-guard, no-todos, file-size,
   doc-coupling, docs-generated. Avoid needless failures: write the test file alongside the
@@ -60,7 +63,8 @@ off-convention branches. Tied to the branch, NOT a worktree.
 **Escape hatches (human break-glass — agents do NOT self-exempt):**
 `ALLOW_EXEMPT=1` add a `.test-exempt` entry · `ALLOW_NO_TEST_UPDATE=1` edit a source without
 its test · `ALLOW_STATE_EDIT=1` hand-edit `task_list.json` · `ALLOW_NO_DOC_UPDATE=1`
-change a script without touching docs · `BREAK_GLASS=1` force-approve the AI review.
+change a script without touching docs · `ALLOW_MAIN_COMMIT=1` commit directly to main ·
+`BREAK_GLASS=1` force-approve the AI review.
 
 **Guarantees you can rely on:** every commit is gated; every land re-gates + AI-reviews
 before main moves; state changes only through `task.py`; a fresh/compacted session is

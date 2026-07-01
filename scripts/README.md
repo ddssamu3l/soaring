@@ -122,6 +122,8 @@ python3 scripts/land.py feature/t1-dataset --task t1   # gate + review + merge +
 
 ## What you can rely on to exist
 
+- Direct commits to `main` are refused by the pre-commit hook — work goes on a
+  `feature/<taskid>-<slug>` branch; main advances only via `land.py` (override: `ALLOW_MAIN_COMMIT=1`).
 - Every commit (yours or an agent's) is gated by `check_all` via the pre-commit hook.
 - Every land re-gates the merge and runs the AI review before main moves.
 - `task_list.json` can only change through `task.py` (the hook blocks the bypass).

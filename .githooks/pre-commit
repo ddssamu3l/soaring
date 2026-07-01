@@ -9,6 +9,19 @@
 # agent's staged files, not main's.
 set -euo pipefail
 
+# Branch guard: real work goes on a feature branch; main only advances via land.py.
+# This blocks a direct `git commit` on main. It does NOT block landing: `git merge`
+# fires pre-merge-commit (not this hook), and land.py invokes check_all.py directly.
+# Bootstrap / deliberate override: ALLOW_MAIN_COMMIT=1.
+BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+if [ "$BRANCH" = "main" ] && [ "${ALLOW_MAIN_COMMIT:-}" != "1" ]; then
+  echo "pre-commit: refusing a direct commit to main." >&2
+  echo "            work on a feature branch:  git checkout -b feature/<taskid>-<slug>" >&2
+  echo "            then land it:              python3 scripts/land.py feature/<...>" >&2
+  echo "            (override for bootstrap:   ALLOW_MAIN_COMMIT=1 git commit ...)" >&2
+  exit 1
+fi
+
 ROOT="$(cd "$(dirname "$(git rev-parse --git-common-dir)")" && pwd)"
 VENV_PY="$ROOT/.venv/bin/python"
 
