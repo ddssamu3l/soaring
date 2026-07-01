@@ -55,6 +55,10 @@ off-convention branches. Tied to the branch, NOT a worktree.
   Change it ONLY via `task.py` (enforces one-active-task, deps, real-commit-for-done).
 - **`land.py`** serializes via a file lock, re-gates the *merged* result + the merge delta,
   runs the AI review, and **rolls main back on ANY failure**.
+- **No direct `git merge` into `main`** — a `pre-merge-commit` hook refuses it (main moves
+  only via `land.py`, which sets `LAND_ACTIVE=1`; the repo sets `merge.ff=false` so a
+  fast-forward can't dodge the hook). This makes "every merge is judged" a git guarantee,
+  not a convention. (Override for a deliberate manual merge: `ALLOW_DIRECT_MERGE=1`.)
 - **AI reviewer** (risk-tiered panel via `land`): `ml-integrity` guards the **sensor
   firewall** (a model must NEVER see a Thermal's true `x0,y0,w_peak,radius` — only
   `sense()`) + silent-ML; a `docs` lens fires on any `scripts/*.py` change and checks the
@@ -64,10 +68,12 @@ off-convention branches. Tied to the branch, NOT a worktree.
 `ALLOW_EXEMPT=1` add a `.test-exempt` entry · `ALLOW_NO_TEST_UPDATE=1` edit a source without
 its test · `ALLOW_STATE_EDIT=1` hand-edit `task_list.json` · `ALLOW_NO_DOC_UPDATE=1`
 change a script without touching docs · `ALLOW_MAIN_COMMIT=1` commit directly to main ·
-`BREAK_GLASS=1` force-approve the AI review.
+`ALLOW_DIRECT_MERGE=1` merge into main without `land.py` · `BREAK_GLASS=1` force-approve
+the AI review.
 
 **Guarantees you can rely on:** every commit is gated; every land re-gates + AI-reviews
-before main moves; state changes only through `task.py`; a fresh/compacted session is
+before main moves; **main cannot move any other way** — a direct commit *or* a raw `git merge`
+into main is refused by a hook, so the judge is un-skippable; state changes only through `task.py`; a fresh/compacted session is
 auto-rehydrated from disk; the CLI reference below can't drift (it's generated from the
 scripts' own `--help`).
 

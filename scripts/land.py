@@ -9,6 +9,8 @@ until the first finishes and main only moves one merge at a time. Each landing:
     1. acquire the queue lock              (only one landing in flight)
     2. require the checkout on `main`, clean
     3. merge the feature branch --no-ff    (conflicts surface HERE, not silently)
+       (the pre-merge-commit hook refuses merges into main unless LAND_ACTIVE=1,
+        which we set below — so this is the ONLY sanctioned door to main)
     4. run check_all on the merged result  ("main moved under me" is caught now)
     4b. re-check test-coupling + exempt-guard on the merge delta (catches a commit
         that bypassed the pre-commit hook with --no-verify)
@@ -162,6 +164,11 @@ def main() -> int:
         help="task_list.json task id to mark done on a successful land (e.g. t2)",
     )
     args = ap.parse_args()
+
+    # Authorize our own merge past the pre-merge-commit guard (.githooks/pre-merge-commit),
+    # which refuses any un-sanctioned `git merge` into main. Set process-wide so every
+    # child git call (the --no-ff merge in particular) inherits it.
+    os.environ["LAND_ACTIVE"] = "1"
 
     LOCK.parent.mkdir(exist_ok=True)
     with open(LOCK, "w") as lockf:
