@@ -1,26 +1,31 @@
 #!/usr/bin/env python3
 """
-land.py -- the serialized merge queue. The third pillar: many agents work in
-isolated worktrees; landing to main goes through here, ONE AT A TIME.
+land.py -- the serialized merge queue: the only path from a feature branch to main.
 
-A file lock guarantees serialization: if two agents call `land` at once, the
-second blocks until the first finishes, so main only ever moves one merge at a
-time. Each landing:
+Work is sequential, branch-per-task in ONE checkout (no worktrees while single-writer).
+A file lock still serializes landings, so if two ever run at once the second blocks
+until the first finishes and main only moves one merge at a time. Each landing:
 
-    1. acquire the queue lock            (only one landing in flight)
-    2. require primary worktree on main, clean
-    3. merge the feature branch into main  (conflicts surface HERE, not silently)
+    1. acquire the queue lock              (only one landing in flight)
+    2. require the checkout on `main`, clean
+    3. merge the feature branch --no-ff    (conflicts surface HERE, not silently)
     4. run check_all on the merged result  ("main moved under me" is caught now)
-    5. run the AI review on the merge
-    6. all green  -> keep the merge (+ best-effort push)
-       any red    -> roll main back, report why; the agent fixes and re-lands
+    4b. re-check test-coupling + exempt-guard on the merge delta (catches a commit
+        that bypassed the pre-commit hook with --no-verify)
+    5. run the AI review on exactly what this landing adds
+    6. all green -> keep the merge, best-effort push, and mark the task done
+       any red   -> roll main back, report why; fix on the branch and re-land
 
-Usage (run from the primary worktree, on a clean main):
-    python scripts/land.py feature/dataset-logger
+The task is marked done automatically: the branch name `feature/<taskid>-<slug>`
+binds the task, so `land feature/t1-dataset` runs `task.py done t1` on success
+(override with --task tN). Best-effort -- a bookkeeping mismatch never undoes a merge.
 
-Isolate during work (worktrees), serialize at integration (this). To make a
-worktree for an agent:
-    git worktree add ../soaring-<name> -b feature/<name>
+Usage (run from the checkout, on a clean main):
+    python scripts/land.py feature/t1-dataset      # derives + marks t1 done
+    python scripts/land.py my-branch --task t1      # explicit task binding
+
+The loop: task.py start -> git checkout -b feature/<taskid>-<slug> -> commit
+(pre-commit runs check_all) -> git checkout main -> land.py.
 """
 
 from __future__ import annotations
