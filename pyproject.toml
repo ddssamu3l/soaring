@@ -1,0 +1,38 @@
+[project]
+name = "soaring"
+version = "0.1.0"
+description = "A glider-in-a-thermal sim — the JEPA keystone testbed."
+requires-python = ">=3.12"
+dependencies = [
+    "numpy>=2.0",
+    "matplotlib>=3.9",
+]
+
+[dependency-groups]
+# dev tools used by the check-all gate. install: uv pip install ruff mypy pytest pytest-cov
+dev = ["ruff", "mypy", "pytest", "pytest-cov"]
+
+# --- lint / format -------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+# start sane; ratchet more rule families in later (see check_all.py RATCHET TODO).
+select = ["E", "F", "W", "I", "B", "UP"]
+
+# --- types (strict — the highest-value gate) -----------------------------
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["fly.py", "glider_sim.py"]
+
+# --- tests + coverage ----------------------------------------------------
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+pythonpath = [".", "scripts"]   # import glider_sim (root) + check_all (gate logic)
+
+# Test policy is FILE-BASED (see scripts/check_all.py + .test-exempt), not a
+# coverage percentage. Presence proves a test exists; a mutation-score floor
+# (ratchet TODO) will later prove the tests actually bite.

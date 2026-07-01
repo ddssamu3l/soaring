@@ -9,3 +9,6 @@ venv/
 
 # OS
 .DS_Store
+
+# local planning / context — NOT part of the public artifact
+CLAUDE.md

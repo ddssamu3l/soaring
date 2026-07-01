@@ -1,0 +1,11 @@
+# Files/folders that do NOT need a matching test file.
+#
+# Adding an entry here is a HUMAN decision: the exempt-guard gate BLOCKS any
+# commit that adds a line unless it is landed with ALLOW_EXEMPT=1. An agent
+# cannot exempt itself out of writing a test. Keep this list short — prefer
+# writing the test.
+#
+# Format: repo-relative path; a trailing "/" means "this folder and everything under it".
+
+fly.py       # plotting entrypoint — no meaningful unit test
+scripts/     # the gate + orchestration tooling itself

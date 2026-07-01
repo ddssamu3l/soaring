@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# The environment gate: no commit (yours or an agent's) lands unless check_all is green.
+#
+# Interpreter resolution matters here: linked worktrees share this hook (via
+# core.hooksPath) but do NOT have their own `.venv` (it's gitignored, lives only in
+# the main checkout). So resolve python from the SHARED repo root, not a
+# worktree-relative `.venv/bin/python` that won't exist in `../soaring-<agent>`.
+# The SCRIPT itself stays worktree-local (cwd = the worktree), so check_all sees the
+# agent's staged files, not main's.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$(git rev-parse --git-common-dir)")" && pwd)"
+VENV_PY="$ROOT/.venv/bin/python"
+
+if [ ! -x "$VENV_PY" ]; then
+  echo "pre-commit: no venv interpreter at $VENV_PY" >&2
+  echo "            create it in the main checkout:  uv venv && uv pip install ruff mypy pytest" >&2
+  exit 1
+fi
+
+exec "$VENV_PY" scripts/check_all.py
