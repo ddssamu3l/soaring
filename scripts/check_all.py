@@ -14,16 +14,6 @@ Test policy is FILE-BASED, not percentage-based:
   * every source .py must have a matching tests/test_<name>.py  (presence)
   * editing a source file without touching its test is blocked   (coupling)
   * exceptions live in .test-exempt, and ADDING one needs a human (guard)
-
-RATCHET -- add next, when the project earns each:
-  * duplicate-code detection  -> when agents start adding modules (step 1+)
-  * AGENTS.md validation      -> if/when a committed agent-doc references files
-  * CI parity check           -> the moment a CI workflow exists
-  * sensor-firewall gate      -> when the data-gen module lands: assert the MLP
-                                 input builder never imports Thermal internals
-  * mutation-score floor      -> the real test-QUALITY gate (mutmut); file-presence
-                                 proves a test EXISTS, mutation proves it BITES
-  * bump mypy/ruff rule sets  -> tighten as the codebase grows
 """
 
 from __future__ import annotations

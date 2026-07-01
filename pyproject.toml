@@ -18,7 +18,7 @@ line-length = 100
 target-version = "py312"
 
 [tool.ruff.lint]
-# start sane; ratchet more rule families in later (see check_all.py RATCHET TODO).
+# start sane; add more rule families as the codebase grows.
 select = ["E", "F", "W", "I", "B", "UP"]
 
 # --- types (strict — the highest-value gate) -----------------------------
@@ -34,5 +34,4 @@ addopts = "-q"
 pythonpath = [".", "scripts"]   # import glider_sim (root) + check_all (gate logic)
 
 # Test policy is FILE-BASED (see scripts/check_all.py + .test-exempt), not a
-# coverage percentage. Presence proves a test exists; a mutation-score floor
-# (ratchet TODO) will later prove the tests actually bite.
+# coverage percentage: presence proves a test exists.

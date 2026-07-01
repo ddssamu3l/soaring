@@ -5,8 +5,8 @@ The scaffold that lets agents work on this repo safely. Two layers:
 - **Gate + merge** — make bad code un-landable (deterministic gate → AI review → serialized merge).
 - **Durable state** — survive compaction / fresh sessions by keeping truth on disk, not in the context window.
 
-> This file is the reference we'll later distill into `CLAUDE.md` so a fresh Claude
-> knows the conventions and stops tripping avoidable gate errors.
+> Full human reference for the toolchain. The condensed, always-loaded version lives
+> in `.claude/rules/agentic-workflow.md`; this is the deeper dive.
 
 ---
 
