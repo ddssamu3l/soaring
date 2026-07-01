@@ -11,6 +11,7 @@ Pure stdlib; runs under any python3.
 
 from __future__ import annotations
 
+import argparse
 import datetime
 import json
 import subprocess
@@ -42,10 +43,12 @@ def _sha() -> str:
 
 
 def main() -> int:
-    if len(sys.argv) < 2:
-        print("usage: log.py <message>", file=sys.stderr)
-        return 1
-    msg = " ".join(sys.argv[1:])
+    ap = argparse.ArgumentParser(
+        prog="log.py", description="Append a stamped line to progress.txt."
+    )
+    ap.add_argument("message", nargs="+", help="the progress note to append")
+    args = ap.parse_args()
+    msg = " ".join(args.message)
     day = datetime.date.today().isoformat()
     line = f"{day}  [{_active()} {_sha()}]  {msg}\n"
     with open(PROGRESS, "a") as f:

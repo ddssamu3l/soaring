@@ -37,6 +37,8 @@ REPO = Path(__file__).resolve().parent.parent
 EXEMPT_FILE = REPO / ".test-exempt"
 TESTS_DIR = REPO / "tests"
 MAX_FILE_LINES = 600
+# docs that must track the scripts (keeps the workflow doc in sync with the mechanics)
+DOC_FILES = {".claude/rules/agentic-workflow.md", "scripts/README.md"}
 SKIP_DIRS = {".venv", ".git", "__pycache__", ".pytest_cache", ".ruff_cache"}
 TODO_MARKERS = ("TODO", "FIXME", "XXX")
 
@@ -199,6 +201,27 @@ def gate_exemption_guard() -> tuple[bool, str]:
     return True, "exemption changes approved" if added else "exemption list unchanged"
 
 
+def gate_doc_coupling() -> tuple[bool, str]:
+    """A change to any scripts/*.py must also touch a workflow doc, so the docs stay
+    in sync with the mechanics. Commit-time (staged). Override: ALLOW_NO_DOC_UPDATE=1."""
+    staged = set(_staged_files())
+    if not staged:
+        return True, "no staged changes — doc-coupling skipped"
+    scripts_changed = sorted(f for f in staged if f.startswith("scripts/") and f.endswith(".py"))
+    if scripts_changed and not (staged & DOC_FILES):
+        if os.environ.get("ALLOW_NO_DOC_UPDATE") == "1":
+            return True, "scripts changed, docs untouched — allowed via override"
+        head = "scripts changed but no doc touched (update a doc, or ALLOW_NO_DOC_UPDATE=1):\n  "
+        return False, head + "\n  ".join(scripts_changed)
+    return True, "docs tracked with script changes"
+
+
+def gate_docs_generated() -> tuple[bool, str]:
+    """The generated CLI reference must match the scripts' actual --help (no drift)."""
+    code, out = _run([sys.executable, "scripts/gen_docs.py", "--check"])
+    return code == 0, out.strip().splitlines()[-1] if out.strip() else "cli-reference current"
+
+
 def gate_no_todos() -> tuple[bool, str]:
     hits = []
     for p in _source_files():
@@ -232,6 +255,8 @@ GATES = [
     ("test-presence (every file tested)", gate_test_presence),
     ("test-coupling (edits touch tests)", gate_test_coupling),
     ("exempt-guard  (no self-exempting)", gate_exemption_guard),
+    ("doc-coupling  (scripts→docs synced)", gate_doc_coupling),
+    ("docs-generated(cli ref not stale)", gate_docs_generated),
     ("no-todos", gate_no_todos),
     ("file-size", gate_file_size),
 ]

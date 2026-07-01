@@ -14,6 +14,7 @@ Pure stdlib; runs under any python3.
 
 from __future__ import annotations
 
+import argparse
 import json
 import subprocess
 import sys
@@ -88,6 +89,11 @@ def build() -> str:
 
 
 def main() -> int:
+    ap = argparse.ArgumentParser(
+        prog="rehydrate.py", description="Print durable session state from disk."
+    )
+    ap.add_argument("--hook", action="store_true", help="SessionStart-hook mode (same output)")
+    ap.parse_args()
     print(build())
     return 0
 
