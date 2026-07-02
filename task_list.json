@@ -267,7 +267,7 @@
     {
       "id": "t24",
       "title": "guard_state.py doc wording: not gitignored, not tracked",
-      "status": "pending",
+      "status": "active",
       "deps": [],
       "files": [
         "scripts/guard_state.py,scripts/README.md,.claude/rules/agentic-workflow.md"
