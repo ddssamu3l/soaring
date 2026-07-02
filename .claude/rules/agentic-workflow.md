@@ -60,7 +60,11 @@ exception you set up by hand the first time you actually hit it (there is no sta
 worktree tooling; build it only if it recurs). Your harness will also offer worktrees
 (`Agent isolation:worktree`, ultracode): fine for **read-only** fan-out (explore / research
 / review that never commits here); **never** for agents that write code — those stay on the
-coordinator's one branch. If you're unsure, you don't need a worktree.
+coordinator's one branch. If you're unsure, you don't need a worktree. If you *do* run two
+write-sessions, give each its **own** checkout (worktree) — never share one, or their edits,
+branch switches, and staged index collide. `land.py` works from any worktree (its lock lives
+in the shared git dir, so concurrent lands serialize); mutate `task_list.json` from only ONE
+of them (single-writer is global — see the task-state note in scripts/README.md).
 
 **What's enforced (work WITH it, don't fight it):**
 - **No direct commits to `main`** — the pre-commit hook refuses them; real work goes on a

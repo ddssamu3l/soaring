@@ -43,7 +43,22 @@ from pathlib import Path
 import check_all  # sibling in scripts/ (on sys.path); shares the policy logic
 
 REPO = Path(__file__).resolve().parent.parent
-LOCK = REPO / ".git" / "queue.lock"
+
+
+def _common_git_dir() -> Path:
+    """The SHARED .git dir (identical across all linked worktrees). In a linked
+    worktree REPO/.git is a *file* pointing here, not a directory — so we must derive
+    the real common dir rather than assume REPO/.git. Putting the queue lock here also
+    makes it shared, so concurrent lands from different worktrees actually serialize
+    (the whole point of the flock)."""
+    r = subprocess.run(
+        ["git", "rev-parse", "--git-common-dir"], cwd=REPO, capture_output=True, text=True
+    )
+    p = Path(r.stdout.strip())
+    return p if p.is_absolute() else (REPO / p)
+
+
+LOCK = _common_git_dir() / "queue.lock"
 PY = REPO / ".venv" / "bin" / "python"
 
 
