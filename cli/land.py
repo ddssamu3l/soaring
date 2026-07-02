@@ -108,12 +108,16 @@ RECONCILABLE = {"task_list.json", "progress.txt"}
 def _reconcile_dirty_state() -> str | None:
     """Absorb a dirty task_list.json/progress.txt into a commit before landing.
     Returns an error message if the tree is dirty in some other, un-reconcilable
-    way, else None."""
-    porcelain = git(["status", "--porcelain"]).stdout
-    dirty = {ln[3:] for ln in porcelain.splitlines() if ln.strip()}
-    if not dirty:
+    way, else None. Only modifications reconcile -- a DELETED state file ('D' in
+    either porcelain status column) falls back to the hard-refuse branch instead
+    of being silently `git add`-ed (which would commit the deletion to main): the
+    scaffold's own tools never delete these files, so a deletion is a signal
+    something went wrong, not routine WIP (flagged in t20's review)."""
+    lines = [ln for ln in git(["status", "--porcelain"]).stdout.splitlines() if ln.strip()]
+    if not lines:
         return None
-    if not dirty <= RECONCILABLE:
+    dirty = {ln[3:] for ln in lines}
+    if not dirty <= RECONCILABLE or any("D" in ln[:2] for ln in lines):
         return "main worktree is dirty — commit/stash first (won't stomp your work)."
     git(["add", *sorted(dirty)])
     commit = git(
