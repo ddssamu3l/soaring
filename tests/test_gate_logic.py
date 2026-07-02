@@ -13,9 +13,11 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import io
 import json
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -431,3 +433,76 @@ def test_task_begin_refuses_if_start_refuses(
 
     assert task_cli.cmd_begin(_begin_ns("t1")) != 0
     assert not calls, "must not touch git if start itself refused"
+
+
+# --- guard_state.py blocks hand-edits of tracked files in PRIMARY (2026-07-02) ---
+# `_is_primary_checkout`/`_is_gitignored` shell real git against the actual REPO --
+# monkeypatched here rather than exercised live, same reasoning as task.py's own
+# git-touching helpers: this only tests the decision logic, not git itself.
+def _load_guard_module() -> Any:
+    spec = importlib.util.spec_from_file_location(
+        "guard_state_under_test", REPO / "scripts" / "guard_state.py"
+    )
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _run_guard(
+    module: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    file_path: str,
+    *,
+    primary: bool,
+    ignored: bool,
+) -> int:
+    monkeypatch.setattr(module, "_is_primary_checkout", lambda: primary)
+    monkeypatch.setattr(module, "_is_gitignored", lambda p: ignored)
+    monkeypatch.setattr(
+        sys, "stdin", io.StringIO(json.dumps({"tool_input": {"file_path": file_path}}))
+    )
+    return int(module.main())
+
+
+def test_guard_blocks_tracked_edit_in_primary(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _load_guard_module()
+    target = str(module.REPO / "cli" / "task.py")
+    assert _run_guard(module, monkeypatch, target, primary=True, ignored=False) == 2
+
+
+def test_guard_allows_tracked_edit_in_a_task_worktree(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _load_guard_module()
+    target = str(module.REPO / "cli" / "task.py")
+    assert _run_guard(module, monkeypatch, target, primary=False, ignored=False) == 0
+
+
+def test_guard_allows_gitignored_file_in_primary(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _load_guard_module()
+    target = str(module.REPO / "CLAUDE.md")
+    assert _run_guard(module, monkeypatch, target, primary=True, ignored=True) == 0
+
+
+def test_guard_main_edit_break_glass(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _load_guard_module()
+    monkeypatch.setenv("ALLOW_MAIN_EDIT", "1")
+    target = str(module.REPO / "cli" / "task.py")
+    assert _run_guard(module, monkeypatch, target, primary=True, ignored=False) == 0
+
+
+def test_guard_state_files_guarded_in_any_checkout_including_worktrees(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_guard_module()
+    target = str(module.REPO / "task_list.json")
+    # state-file guard applies regardless of primary/worktree -- it's the OTHER rule
+    assert _run_guard(module, monkeypatch, target, primary=False, ignored=False) == 2
+
+
+def test_guard_state_edit_break_glass_unaffected_by_main_edit_flag(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_guard_module()
+    monkeypatch.setenv("ALLOW_STATE_EDIT", "1")
+    target = str(module.REPO / "progress.txt")
+    assert _run_guard(module, monkeypatch, target, primary=True, ignored=False) == 0
