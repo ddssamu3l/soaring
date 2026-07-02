@@ -141,14 +141,14 @@
     {
       "id": "t13",
       "title": "Flight replay viewport (pygame) \u2014 scrub/step/play logged episodes + instruments",
-      "status": "active",
+      "status": "done",
       "deps": [
         "t1"
       ],
       "files": [
         "viewport.py,tests/test_viewport.py"
       ],
-      "commit": null,
+      "commit": "10e1eb0b3dbfa27788630667c259ec8e24bddb87",
       "notes": "REPLAY-ONLY pygame viewport for logged flight episodes (NOT realtime manual flight \u2014 that is a future task built on top of this one). Features: episode selector; play/pause + playback speed; timeline scrub; single-step forward/back; top-down view (thermal-field heatmap + flown path + glider marker + heading); instrument panel (airspeed, altimeter, vario, vario_te, bank). Scrubbing = pure array indexing \u2014 episodes are precomputed contiguous chains; NO physics runs in the viewport. DATA: data/dataset.npz (gitignored; regenerate with .venv/bin/python data_gen.py). Self-describing format: true_states (N,6: x,y,z,heading,airspeed,bank), sensors (N,8: same 6 + vario,vario_te), actions (N,2: bank_cmd,pitch_cmd), episode (N,) rollout ids, plus in-file name arrays, glider_params(+names), dt, seed. Within an episode true_next_states[i]==true_states[i+1] bit-exact. Draw the field via data_gen.make_world() (fixed-field phase) \u2014 thermal truth IS allowed for human eyes; the sensor firewall only forbids it as MODEL input. Naming convention everywhere: _cmd=asked, bare=actual, true_*=answer key (eval only). WHY (from main-session discussion 2026-07-01): (a) Mode-B silent-failure detector \u2014 watching rollouts catches what numbers hide (stalls, mush, weird arcs); (b) at t2 this gains ghost-replay: model-predicted trajectory overlaid on truth, diverging over horizon = the keystone plot as a movie \u2014 design the renderer to accept a SECOND trajectory cheaply now; (c) one log format for ALL pilots (random/planner/JEPA/human) is guaranteed by construction \u2014 every pilot flies through sim.step(bank_cmd, pitch_cmd); add a per-episode pilot-provenance tag only when a second pilot type exists (npz keys are additive, no format break). CONTEXT TRAIL: progress.txt (decision log incl. physics-fold deferrals), CLAUDE.md section Sim-v2-scoping (viewport rec: 2D pygame first, scope caution \u2014 polish on purpose, serve the JEPA), glider_sim.py module docstring (physics + panel + naming), data_gen.py docstring (schema + firewall). Left-off state: t1 (real airframe physics + data factory) green at handoff on feature/t1-dataset awaiting land greenlight. pygame must be added as a dependency (uv)."
     },
     {
