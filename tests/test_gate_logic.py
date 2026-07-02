@@ -11,12 +11,16 @@ tests. These lock in the three fixes from the worktree/merge-queue audit:
 
 from __future__ import annotations
 
+import argparse
+import importlib.util
 import json
 import shutil
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import check_all
+import pytest
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -269,3 +273,74 @@ def test_task_notes_missing_id_errors(tmp_path: Path) -> None:
         text=True,
     )
     assert r.returncode != 0
+
+
+# --- task.py done accepts pending, not just active (2026-07-02) -----------------
+# `active` lives only in the primary checkout's uncommitted working tree, so it's
+# easy to lose between `start` and land.py's post-merge done-mark (hit for real
+# landing t18). `done` shells out to `git cat-file` to verify the commit exists --
+# a real subprocess git call in a test previously inherited GIT_DIR from the
+# pre-commit hook's own environment and corrupted the shared repo for real (hit
+# for real writing this test the first time: primary's core.bare flipped true,
+# a stray commit landed on this very branch). Fix: never shell out to git at
+# all here -- import task.py as a module, monkeypatch `_git_has`, and call
+# `cmd_done` in-process. Zero subprocesses, zero risk.
+def _load_task_module() -> Any:
+    spec = importlib.util.spec_from_file_location("task_cli_under_test", REPO / "cli" / "task.py")
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _done_ns(tid: str) -> argparse.Namespace:
+    return argparse.Namespace(id=tid, commit="deadbeef")
+
+
+def _state(status: str) -> dict[str, Any]:
+    return {
+        "tasks": [
+            {
+                "id": "t1",
+                "title": "some task",
+                "status": status,
+                "deps": [],
+                "files": [],
+                "commit": None,
+                "notes": "",
+            },
+        ]
+    }
+
+
+def test_task_done_accepts_pending(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    task_cli = _load_task_module()
+    monkeypatch.setattr(task_cli, "STATE", tmp_path / "task_list.json")
+    monkeypatch.setattr(task_cli, "_git_has", lambda sha: True)
+    task_cli.STATE.write_text(json.dumps(_state("pending")))
+    assert task_cli.cmd_done(_done_ns("t1")) == 0
+    assert json.loads(task_cli.STATE.read_text())["tasks"][0]["status"] == "done"
+
+
+def test_task_done_still_accepts_active(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    task_cli = _load_task_module()
+    monkeypatch.setattr(task_cli, "STATE", tmp_path / "task_list.json")
+    monkeypatch.setattr(task_cli, "_git_has", lambda sha: True)
+    task_cli.STATE.write_text(json.dumps(_state("active")))
+    assert task_cli.cmd_done(_done_ns("t1")) == 0
+
+
+def test_task_done_rejects_blocked(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    task_cli = _load_task_module()
+    monkeypatch.setattr(task_cli, "STATE", tmp_path / "task_list.json")
+    monkeypatch.setattr(task_cli, "_git_has", lambda sha: True)
+    task_cli.STATE.write_text(json.dumps(_state("blocked")))
+    assert task_cli.cmd_done(_done_ns("t1")) != 0
+
+
+def test_task_done_rejects_already_done(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    task_cli = _load_task_module()
+    monkeypatch.setattr(task_cli, "STATE", tmp_path / "task_list.json")
+    monkeypatch.setattr(task_cli, "_git_has", lambda sha: True)
+    task_cli.STATE.write_text(json.dumps(_state("done")))
+    assert task_cli.cmd_done(_done_ns("t1")) != 0
