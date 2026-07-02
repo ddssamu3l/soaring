@@ -113,12 +113,13 @@ other task.
 - **`task_list.json` and `progress.txt` are edit-locked** — a PreToolUse hook blocks direct
   Edit/Write. Change them ONLY via their CLI: `task.py` (enforces one-active-task, deps,
   real-commit-for-done) and `log.py` (append-only, auto-stamped). Break-glass: `ALLOW_STATE_EDIT=1`.
-- **No hand-editing tracked files in the PRIMARY checkout, ever** — the same
-  `guard_state.py` hook blocks direct Edit/Write on any tracked, non-gitignored file
-  when the current checkout is primary (not a linked task worktree). Real changes go
-  on a worktree, gated + reviewed via `land.py`, task-bound or not (see "Quick
-  changes" above). Gitignored local files (`CLAUDE.md`, `.venv`, `data/`) are exempt
-  — no gate applies to them anywhere. Break-glass: `ALLOW_MAIN_EDIT=1`.
+- **No hand-editing (or creating) a non-gitignored file in the PRIMARY checkout,
+  ever** — the same `guard_state.py` hook blocks direct Edit/Write on any file that
+  isn't gitignored when the current checkout is primary (not a linked task
+  worktree) — including a brand-new file, not just an already-tracked one. Real
+  changes go on a worktree, gated + reviewed via `land.py`, task-bound or not (see
+  "Quick changes" above). Gitignored local files (`CLAUDE.md`, `.venv`, `data/`) are
+  exempt — no gate applies to them anywhere. Break-glass: `ALLOW_MAIN_EDIT=1`.
 - **`land.py`** serializes via a file lock, re-gates the *merged* result + the merge delta,
   runs the AI review, and **rolls main back on ANY failure**.
 - **No direct `git merge` into `main`** — a `pre-merge-commit` hook refuses it (main moves
