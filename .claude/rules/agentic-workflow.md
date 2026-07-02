@@ -61,6 +61,23 @@ is the user's call.
 `tN` and marks it done on a green merge (no flag to remember). `--task tN` overrides for
 off-convention branches. Tied to the branch name.
 
+**Quick changes that don't warrant a task.** Not every change is roadmap work — a typo
+fix, a one-line doc nit. `land.py` doesn't require a task binding at all: if the branch
+name doesn't match `feature/<taskid>-...`, it just skips the done-marking step and does
+everything else (gate, review, serialized merge, rollback on failure) — same safety, zero
+`task_list.json` bookkeeping. Skip `task.py add`/`begin` entirely and worktree straight off
+a plain branch:
+```bash
+git worktree add ../soaring-quickfix -b quickfix/typo-in-readme main
+cd ../soaring-quickfix
+#   ... edit, commit (pre-commit hook still runs check_all) ...
+cd -
+python3 cli/land.py quickfix/typo-in-readme     # gates + reviews + merges; nothing to mark done
+```
+Still needs its own worktree, same as any other change — `guard_state.py` blocks hand-
+editing tracked files directly in primary regardless of whether a task is involved (see
+"What's enforced" below).
+
 **Parallelism (worktree-per-task is the standing default).** Every task, whether or not
 another task happens to be active, gets its **own** checkout (`task.py begin tN` does
 this for you: `git worktree add ../soaring-<taskid> -b feature/<taskid>-<slug> main`).
@@ -96,6 +113,12 @@ other task.
 - **`task_list.json` and `progress.txt` are edit-locked** — a PreToolUse hook blocks direct
   Edit/Write. Change them ONLY via their CLI: `task.py` (enforces one-active-task, deps,
   real-commit-for-done) and `log.py` (append-only, auto-stamped). Break-glass: `ALLOW_STATE_EDIT=1`.
+- **No hand-editing tracked files in the PRIMARY checkout, ever** — the same
+  `guard_state.py` hook blocks direct Edit/Write on any tracked, non-gitignored file
+  when the current checkout is primary (not a linked task worktree). Real changes go
+  on a worktree, gated + reviewed via `land.py`, task-bound or not (see "Quick
+  changes" above). Gitignored local files (`CLAUDE.md`, `.venv`, `data/`) are exempt
+  — no gate applies to them anywhere. Break-glass: `ALLOW_MAIN_EDIT=1`.
 - **`land.py`** serializes via a file lock, re-gates the *merged* result + the merge delta,
   runs the AI review, and **rolls main back on ANY failure**.
 - **No direct `git merge` into `main`** — a `pre-merge-commit` hook refuses it (main moves
@@ -111,8 +134,8 @@ other task.
 `ALLOW_EXEMPT=1` add a `.test-exempt` entry · `ALLOW_NO_TEST_UPDATE=1` edit a source without
 its test · `ALLOW_STATE_EDIT=1` hand-edit `task_list.json` or `progress.txt` · `ALLOW_NO_DOC_UPDATE=1`
 change a script without touching docs · `ALLOW_MAIN_COMMIT=1` commit directly to main ·
-`ALLOW_DIRECT_MERGE=1` merge into main without `land.py` · `BREAK_GLASS=1` force-approve
-the AI review.
+`ALLOW_DIRECT_MERGE=1` merge into main without `land.py` · `ALLOW_MAIN_EDIT=1` hand-edit
+a tracked file directly in primary · `BREAK_GLASS=1` force-approve the AI review.
 
 **Guarantees you can rely on:** every commit is gated; every land re-gates + AI-reviews
 before main moves; **main cannot move any other way** — a direct commit *or* a raw `git merge`

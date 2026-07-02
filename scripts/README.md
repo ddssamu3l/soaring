@@ -70,6 +70,14 @@ edit-locked by the `guard_state.py` PreToolUse hook — direct Edit/Write is blo
 `log.py` is the door (break-glass: `ALLOW_STATE_EDIT=1`). The hook only catches the *tool*,
 not this CLI's own write.
 
+`guard_state.py` also blocks direct Edit/Write on **any other tracked, non-gitignored
+file when the current checkout is PRIMARY** (not a linked task worktree) — real changes
+belong on a task's dedicated worktree, gated + reviewed via `land.py`, task-bound or not
+(see "the task binding is entirely optional", under `land.py` below). It detects primary
+vs. a linked worktree via `git rev-parse --git-dir` vs. `--git-common-dir` (identical
+only in the primary checkout). Gitignored local files (`CLAUDE.md`, `.venv`, `data/`)
+are exempt everywhere — no gate applies to them. Break-glass: `ALLOW_MAIN_EDIT=1`.
+
 ### `rehydrate.py` — resume from disk
 
 ```bash
@@ -158,6 +166,19 @@ python3 cli/land.py my-branch --task t1        # override when the branch can't 
 
 On success it merges, pushes (best-effort), and runs `task.py done t1 --commit <sha>`.
 A bookkeeping mismatch warns but never undoes a good merge.
+
+**The task binding is entirely optional.** If the branch name doesn't match
+`feature/<taskid>-...` and no `--task` is given, `land.py` just skips the
+done-marking step — everything else (gate, review, serialized merge, rollback
+on failure) runs exactly the same. For a change too small to warrant a task
+(a typo, a one-line doc nit), skip `task.py add`/`begin` and worktree off a
+plain branch instead:
+
+```bash
+git worktree add ../soaring-quickfix -b quickfix/typo-in-readme main
+cd ../soaring-quickfix && # ... edit, commit ... && cd -
+python3 cli/land.py quickfix/typo-in-readme    # full gate + review + merge; nothing to mark done
+```
 
 ### `review.py` — the AI reviewer (invoked by `land.py`; can run standalone)
 
