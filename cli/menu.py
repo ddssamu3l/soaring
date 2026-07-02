@@ -36,7 +36,7 @@ SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
             ("python3 cli/task.py next", "show the next pickable task"),
             (
                 "python3 cli/task.py list",
-                "status board — progress bar, deps, next-up  (add --full for notes + framing)",
+                "status board — done tasks hidden by default  (add --full to see them + notes)",
             ),
             ("python3 cli/task.py start t1", "claim a task — single-writer; checks deps"),
             (

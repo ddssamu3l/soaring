@@ -11,6 +11,9 @@ tests. These lock in the three fixes from the worktree/merge-queue audit:
 
 from __future__ import annotations
 
+import json
+import shutil
+import subprocess
 from pathlib import Path
 
 import check_all
@@ -152,3 +155,47 @@ def test_task_add_commits_via_plumbing_not_git_commit() -> None:
 def test_task_add_does_not_push() -> None:
     task = (REPO / "cli" / "task.py").read_text()
     assert '"push"' not in task, "add must not publish -- that stays land.py's job"
+
+
+# --- task.py list hides done tasks by default (user preference, 2026-07-02) -----
+# Functional (not just static) since it's cheap and safe here: `list` never touches
+# git, only reads task_list.json, so a copy of task.py in a scratch dir with a fake
+# state file is fully isolated -- no worktree/git plumbing involved, unlike `add`.
+def test_task_list_hides_done_by_default(tmp_path: Path) -> None:
+    cli_dir = tmp_path / "cli"
+    cli_dir.mkdir()
+    shutil.copy(REPO / "cli" / "task.py", cli_dir / "task.py")
+    state = {
+        "tasks": [
+            {
+                "id": "t1",
+                "title": "done one",
+                "status": "done",
+                "deps": [],
+                "files": [],
+                "commit": "abc123",
+                "notes": "",
+            },
+            {
+                "id": "t2",
+                "title": "pending one",
+                "status": "pending",
+                "deps": [],
+                "files": [],
+                "commit": None,
+                "notes": "",
+            },
+        ]
+    }
+    (tmp_path / "task_list.json").write_text(json.dumps(state))
+
+    plain = subprocess.run(
+        ["python3", "cli/task.py", "list"], cwd=tmp_path, capture_output=True, text=True
+    )
+    full = subprocess.run(
+        ["python3", "cli/task.py", "list", "--full"], cwd=tmp_path, capture_output=True, text=True
+    )
+    assert "t1" not in plain.stdout, "done task t1 must be hidden by default"
+    assert "t2" in plain.stdout
+    assert "t1" in full.stdout, "--full must still show done tasks"
+    assert "t2" in full.stdout
