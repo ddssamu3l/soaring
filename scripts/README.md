@@ -70,13 +70,15 @@ edit-locked by the `guard_state.py` PreToolUse hook — direct Edit/Write is blo
 `log.py` is the door (break-glass: `ALLOW_STATE_EDIT=1`). The hook only catches the *tool*,
 not this CLI's own write.
 
-`guard_state.py` also blocks direct Edit/Write on **any other tracked, non-gitignored
-file when the current checkout is PRIMARY** (not a linked task worktree) — real changes
-belong on a task's dedicated worktree, gated + reviewed via `land.py`, task-bound or not
-(see "the task binding is entirely optional", under `land.py` below). It detects primary
-vs. a linked worktree via `git rev-parse --git-dir` vs. `--git-common-dir` (identical
-only in the primary checkout). Gitignored local files (`CLAUDE.md`, `.venv`, `data/`)
-are exempt everywhere — no gate applies to them. Break-glass: `ALLOW_MAIN_EDIT=1`.
+`guard_state.py` also blocks direct Edit/Write on **any other non-gitignored file when
+the current checkout is PRIMARY** (not a linked task worktree) — this includes creating
+a brand-new file straight in primary, not just editing an already-tracked one; new work
+belongs on a worktree too. Real changes belong on a task's dedicated worktree, gated +
+reviewed via `land.py`, task-bound or not (see "the task binding is entirely optional",
+under `land.py` below). It detects primary vs. a linked worktree via `git rev-parse
+--git-dir` vs. `--git-common-dir` (identical only in the primary checkout). Gitignored
+local files (`CLAUDE.md`, `.venv`, `data/`) are exempt everywhere — no gate applies to
+them. Break-glass: `ALLOW_MAIN_EDIT=1`.
 
 ### `rehydrate.py` — resume from disk
 
