@@ -70,6 +70,17 @@ edit-locked by the `guard_state.py` PreToolUse hook — direct Edit/Write is blo
 `log.py` is the door (break-glass: `ALLOW_STATE_EDIT=1`). The hook only catches the *tool*,
 not this CLI's own write.
 
+`.gitattributes` sets `progress.txt merge=union` (git's builtin union merge driver) so
+that merging main into a feature branch — or any other branch — while both sides
+independently appended lines auto-resolves cleanly, keeping both sides' entries with
+no conflict markers and no hand-editing. Without this, two branches that both append
+while diverged hit a real conflict on the file's tail (hit for real landing t13: main
+had gained several tasks' worth of appends while the branch was in flight). Scoped to
+just this one file via `.gitattributes` rather than a whole-merge `-X union`, which
+would silently union-merge *any* conflicting file, including real code. `task_list.json`
+is NOT covered — it's JSON, not line-mergeable safely; its conflicts still need `land.py`'s
+reconcile path (below) or manual resolution.
+
 `guard_state.py` also blocks direct Edit/Write on **any other non-gitignored file when
 the current checkout is PRIMARY** (not a linked task worktree) — this includes creating
 a brand-new file straight in primary, not just editing an already-tracked one; new work
