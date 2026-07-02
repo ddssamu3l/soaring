@@ -19,10 +19,16 @@ plumbing, no `git commit` -- doesn't touch this checkout's HEAD, doesn't need
 `ALLOW_MAIN_COMMIT`, doesn't push). Falls back to a local-only add if `main`
 can't be resolved (fresh/bootstrap repo) so `add` never hard-fails on that.
 
+`done` accepts an `active` OR `pending` task -- `active` lives only in the local
+checkout's uncommitted working tree, so it's easy to lose between `start` and
+`land.py`'s post-merge done-mark (hit for real landing t18). land.py's
+branch-name-derived task binding is the real proof a task landed, not that
+fragile flag. `blocked`/`done` still refuse (no silent unblock/double-mark).
+
 Commands:
     task.py add   --title T [--deps a,b] [--files "a.py;b.py"] [--notes N]
     task.py start <id>              # -> active   (refuses if another is active)
-    task.py done  <id> --commit SHA # -> done     (SHA must exist in git)
+    task.py done  <id> --commit SHA # -> done     (from active OR pending; SHA must exist in git)
     task.py block <id> --reason R   # -> blocked
     task.py notes <id> (--set T | --append T)  # edit notes without touching status
     task.py list                    # status board
@@ -252,8 +258,15 @@ def cmd_done(a: argparse.Namespace) -> int:
     t = _find(data, a.id)
     if not t:
         return _err(f"{a.id} not found")
-    if t["status"] != "active":
-        return _err(f"{a.id} is {t['status']}, only an active task can be marked done")
+    # `active` is the common case, but under worktree-per-task it's an ephemeral
+    # local flag (never committed) -- ordinary git operations on the primary
+    # checkout (a stray `git checkout`, a dirty-tree reset before landing) can
+    # wipe it between `start` and `land.py`'s post-merge done-mark. Accepting
+    # `pending` too closes that gap: land.py's branch-name-derived task binding
+    # is the real proof this task legitimately landed, not the fragile flag.
+    # `blocked`/`done` still rejected -- no silent unblock, no double-mark.
+    if t["status"] not in ("active", "pending"):
+        return _err(f"{a.id} is {t['status']}, cannot be marked done")
     if not _git_has(a.commit):
         return _err(f"commit {a.commit!r} not in git — a real landed commit is required")
     t["status"] = "done"

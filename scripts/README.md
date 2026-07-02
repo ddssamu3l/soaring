@@ -40,7 +40,7 @@ push, so publishing stays `land.py`'s job on your greenlight.
 ```bash
 python3 cli/task.py add --title "Log a dataset" --deps t1,t2 --files "data_gen.py" --notes "..."
 python3 cli/task.py start t2          # -> active   (refuses if another task is active)
-python3 cli/task.py done  t2 --commit <sha>   # -> done (sha must exist in git)
+python3 cli/task.py done  t2 --commit <sha>   # -> done (from active OR pending; sha must exist in git)
 python3 cli/task.py block t2 --reason "sim API changed"
 python3 cli/task.py notes t2 --set "corrected context"   # replace outright
 python3 cli/task.py notes t2 --append "extra context"    # pipe-separated append, same style as block
@@ -112,6 +112,14 @@ for whoever's checkout happens to be primary next. That commit lands ON main, so
 `land.py` also sets `ALLOW_MAIN_COMMIT=1` for itself (same self-authorization as
 `LAND_ACTIVE` for the merge hook) — without it the pre-commit hook silently refuses
 the commit and best-effort logging hides the failure.
+
+That done-mark call needs the task to be `active` OR `pending` in the primary's
+local `task_list.json` at merge time — `active` lives only in that checkout's
+uncommitted working tree (never committed anywhere), so any ordinary git
+operation on primary between `start` and `land` (a dirty-tree cleanup, a stray
+checkout) can wipe it silently. `task.py done` accepts `pending` too so that
+loss doesn't turn into a failed done-mark — `land.py`'s branch-name-derived
+task binding is the real proof this task landed, not that fragile flag.
 
 **`land.py` is the ONLY door to main — enforced, not asked.** A raw `git merge` into
 main would bypass the judge *and* `check_all` (the pre-commit hook doesn't fire on
