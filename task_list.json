@@ -166,12 +166,12 @@
     {
       "id": "t15",
       "title": "task.py list hides done tasks by default",
-      "status": "active",
+      "status": "done",
       "deps": [],
       "files": [
         "cli/task.py"
       ],
-      "commit": null,
+      "commit": "69b72c1033d8117da74318b8f4b68b5f86f09387",
       "notes": "task.py list currently prints every task including done ones, growing unbounded as the roadmap progresses. Per user preference (2026-07-02): hide done tasks from the default listing; -v/--full (already the 'show more' flag) also brings them back into view. rehydrate.py already only shows a done COUNT, not individual done tasks -- no change needed there. The header progress bar / counts stay based on the full task list regardless of what's filtered from the per-row listing."
     }
   ]
