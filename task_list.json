@@ -234,12 +234,12 @@
     {
       "id": "t21",
       "title": "land.py reconcile: don't auto-commit a deleted task_list.json/progress.txt",
-      "status": "active",
+      "status": "done",
       "deps": [],
       "files": [
         "cli/land.py"
       ],
-      "commit": null,
+      "commit": "e1f618d37de4b10ab33b76d08d1692b1f6d70ab0",
       "notes": "AI review on t20 flagged: _reconcile_dirty_state accepts any porcelain status on the two state files, including deletion (' D task_list.json'), which git add would stage and auto-commit to main. Scaffold's own tools only ever produce modifications; a deletion signals something went wrong and should fall back to the hard-refuse branch. Fix: parse the porcelain status code, only reconcile M/A (modified/added), not D."
     }
   ]
