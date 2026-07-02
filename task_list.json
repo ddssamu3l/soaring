@@ -263,6 +263,17 @@
       ],
       "commit": "67937b49b1496ab641c28ed9e96fec1800567033",
       "notes": "Direct Edit/Write to a tracked source/doc file in PRIMARY was only conventionally discouraged, not hook-enforced -- caught for real when I hand-edited agentic-workflow.md directly in primary for a t17 docs nit and had to self-catch + redo as t18. Extend guard_state.py: task_list.json/progress.txt keep their existing per-file guard (any checkout). NEW: any OTHER tracked, non-gitignored file is also blocked when the CURRENT checkout is the PRIMARY one (git rev-parse --git-dir == --git-common-dir), not a linked task worktree -- coding in a worktree is unaffected, that's the whole point. Gitignored files (CLAUDE.md, .venv, data/) stay unguarded. New break-glass: ALLOW_MAIN_EDIT=1, mirroring ALLOW_MAIN_COMMIT."
+    },
+    {
+      "id": "t24",
+      "title": "guard_state.py doc wording: not gitignored, not tracked",
+      "status": "pending",
+      "deps": [],
+      "files": [
+        "scripts/guard_state.py,scripts/README.md,.claude/rules/agentic-workflow.md"
+      ],
+      "commit": null,
+      "notes": "AI review on t23 flagged: docstring/block message/docs describe the primary-checkout rule as guarding 'tracked, non-gitignored' files, but the code actually blocks ANY non-gitignored in-repo path -- including a brand-new untracked file via Write. Blocking new-file creation in primary is the right call (new work belongs on a worktree too), so keep the behavior; just reword every 'tracked' reference to 'not gitignored' so the docs match reality."
     }
   ]
 }
