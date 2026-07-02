@@ -28,6 +28,15 @@ an LLM would otherwise corrupt: valid JSON, **exactly one `active` task**
 (single-writer), deps satisfied before start, and a **real landed commit required
 to mark done**.
 
+`add` allocates the new id off `main`'s actual tip, not this checkout's local
+copy — under worktree-per-task every worktree forks its own snapshot, so reading
+the local file let two worktrees adding around the same time compute the same
+next id (hit for real: two sessions both landed a task called `t11`). `add` now
+serializes on the same lock `land.py` uses and commits the claim straight onto
+`refs/heads/main` via git plumbing (no `git commit`, so it needs no
+`ALLOW_MAIN_COMMIT` and never touches this checkout's HEAD) — but does **not**
+push, so publishing stays `land.py`'s job on your greenlight.
+
 ```bash
 python3 cli/task.py add --title "Log a dataset" --deps t1,t2 --files "data_gen.py" --notes "..."
 python3 cli/task.py start t2          # -> active   (refuses if another task is active)

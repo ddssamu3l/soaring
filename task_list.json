@@ -154,7 +154,7 @@
     {
       "id": "t14",
       "title": "task.py add commits id allocation to main under land.py's lock",
-      "status": "pending",
+      "status": "active",
       "deps": [],
       "files": [
         "cli/task.py",

@@ -65,6 +65,11 @@ worktree can never collide with any other session's WIP, staged index, or branch
 global lock — two unrelated tasks CAN both be `active` on their own worktree simultaneously;
 the actual serialization point is `land.py`'s file lock, which forces one merge into `main`
 at a time and reconciles any `task_list.json` diffs at that point (see `scripts/README.md`).
+**Id allocation is the one exception that IS globally serialized:** `task.py add` claims
+the new id off `main`'s actual tip under that same lock and commits it there directly
+(plumbing, no push) — otherwise two worktrees adding a task around the same time would
+independently compute the same next id (this happened for real: two sessions both landed
+a task called `t11`).
 `land.py` always runs from the **primary checkout**, on `main` — never from a task's
 worktree — and on a successful land it best-effort removes that branch's worktree + the
 now-merged local branch (step 7), so a task's checkout is disposable once its work lands.
