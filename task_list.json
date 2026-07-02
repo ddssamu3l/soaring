@@ -287,6 +287,17 @@
       ],
       "commit": null,
       "notes": "Found flying the t13 viewport: binary stall flag + dt=0.1 => ~5 Hz stall/recover limit cycle when commanded speed < banked stall speed (IAS pins at Vs(bank), vertical speed square-waves +/-3 m/s). Fix ladder: (1) hysteresis band \u2014 stall below Vs, recover only above Vs + ~1.5 m/s; (2) replace binary stall_sink with a continuous mush ramp near/below Vs (real gliders mush, and smooth dynamics are friendlier to the t2 MLP); (3) optional/later: pitch/AoA state so the phugoid emerges. Deps t2 on purpose: sim stays FROZEN until the keystone plot lands so results are comparable. Regenerate data/dataset.npz after; ledger entry 2026-07-02 has full context."
+    },
+    {
+      "id": "t26",
+      "title": "gitattributes: merge=union for progress.txt",
+      "status": "pending",
+      "deps": [],
+      "files": [
+        ".gitattributes"
+      ],
+      "commit": null,
+      "notes": "t13's landing prep hit a real progress.txt merge conflict when merging main into the feature branch (main gained t17-t24 appends while t13 was in flight), resolved ad hoc by hand. No .gitattributes exists yet, so every future branch will hit the same tail-append conflict and get resolved inconsistently -- risky if anyone reaches for a whole-merge -X union instead (that would silently union-merge ANY conflicting file, mangling real code conflicts). Fix: commit .gitattributes with 'progress.txt merge=union' (git's builtin union merge driver, no custom script needed) so this conflict class auto-resolves safely and consistently on every merge, not just land.py's primary-checkout dirty-tree case (t20/t21, which is a different code path)."
     }
   ]
 }
