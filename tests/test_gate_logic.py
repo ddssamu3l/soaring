@@ -48,7 +48,7 @@ def test_hook_resolves_interpreter_from_shared_repo() -> None:
 
 # --- Fix 3: review must bound the reviewer call --------------------------
 def test_review_caps_claude_with_a_timeout() -> None:
-    review = (REPO / "scripts" / "review.py").read_text()
+    review = (REPO / "cli" / "review.py").read_text()
     assert "timeout=CLAUDE_TIMEOUT" in review, "review.py must pass a timeout to claude"
 
 
@@ -67,5 +67,23 @@ def test_pre_merge_commit_hook_guards_main() -> None:
 def test_land_sets_the_merge_sentinel() -> None:
     # land.py's own merge has to pass the pre-merge-commit guard, so it must set the
     # sentinel the hook checks for.
-    land = (REPO / "scripts" / "land.py").read_text()
+    land = (REPO / "cli" / "land.py").read_text()
     assert 'LAND_ACTIVE"] = "1"' in land, "land.py must set LAND_ACTIVE so its merge passes"
+
+
+# --- land.py must survive running from a task's dedicated worktree -------
+# (worktree-per-task is the standing default; land.py itself runs from the
+# primary checkout, but a bare `REPO / ".venv"` broke the moment ANYONE ran it
+# from a fresh worktree with no .venv of its own — caught landing t10.)
+def test_land_resolves_interpreter_from_shared_repo() -> None:
+    land = (REPO / "cli" / "land.py").read_text()
+    assert 'PY = REPO / ".venv"' not in land, "PY must not be worktree-relative"
+    assert "_common_git_dir().parent" in land, "PY must resolve via the shared repo root"
+
+
+def test_land_rolls_back_on_an_unexpected_crash() -> None:
+    # A merge that lands on main but never gets gated (because land.py crashed, not
+    # because a gate failed) is worse than a loud failure — the post-merge gate/review
+    # steps must be wrapped so ANY exception still triggers rollback().
+    land = (REPO / "cli" / "land.py").read_text()
+    assert "except Exception" in land, "post-merge steps must catch unexpected crashes too"

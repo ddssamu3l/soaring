@@ -20,7 +20,7 @@ BRANCH="$(git rev-parse --abbrev-ref HEAD)"
 if [ "$BRANCH" = "main" ] && [ "${LAND_ACTIVE:-}" != "1" ] && [ "${ALLOW_DIRECT_MERGE:-}" != "1" ]; then
   echo "pre-merge-commit: refusing a direct merge into main." >&2
   echo "                  main moves only via the judged merge queue:" >&2
-  echo "                      python3 scripts/land.py <branch>" >&2
+  echo "                      python3 cli/land.py <branch>" >&2
   echo "                  (it runs check_all + the AI review and rolls back on failure)." >&2
   echo "                  clean up this aborted merge:  git merge --abort" >&2
   echo "                  human break-glass:            ALLOW_DIRECT_MERGE=1 git merge ..." >&2

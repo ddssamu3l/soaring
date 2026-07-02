@@ -103,6 +103,18 @@
       "files": [],
       "commit": null,
       "notes": "RC glider + flight controller + vario/IMU/GPS, INFERENCE ONLY (training stays on the Mac). A second, filmable, real-physics datapoint. Not needed for the result. The hobby-scan flagged the RC CAR as the cheapest physical keystone if a glider is fiddly \u2014 same engine on wheels, also filmable."
+    },
+    {
+      "id": "t10",
+      "title": "Move CLIs into a cli/ folder for gen_docs auto-discovery",
+      "status": "done",
+      "deps": [],
+      "files": [
+        "cli/",
+        "scripts/gen_docs.py"
+      ],
+      "commit": "45ad299",
+      "notes": "Move CLI entrypoints into a dedicated cli/ folder so gen_docs.py globs cli/*.py instead of the hardcoded CLIS list \u2014 makes 'every CLI is documented' structural, killing the drift class the judge flagged (menu.py was silently missing from the generated ref, and docs-generated can't catch its own omission). Touches: hook paths (.githooks/, .claude/settings.json), the scripts/ test-exempt entry, land.py's sibling import of check_all, and every doc referencing scripts/<name>.py. Own branch; don't fold into other work."
     }
   ]
 }
