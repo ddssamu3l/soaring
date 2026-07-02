@@ -117,6 +117,26 @@ def test_land_authorizes_its_own_done_mark_commit() -> None:
     assert 'ALLOW_MAIN_COMMIT"] = "1"' in land, "land.py must self-authorize its main commit"
 
 
+# --- land.py reconciles a dirty task_list.json/progress.txt instead of refusing --
+# (task.py's start/block/notes/done and log.py's appends all rewrite these two files
+# on disk without committing -- that's land.py's job. Hard-refusing on ANY dirty file
+# forced a manual discard/reset before every land, easy to forget -- hit for real
+# landing t18/t19. These two files are the only ones this scaffold's own tools ever
+# leave dirty, so folding them into a commit here is no riskier than the existing
+# done-mark commit. Static assertions -- `_reconcile_dirty_state` shells real git
+# against the actual REPO constant, so it can't be exercised live in a test without
+# risking the exact corruption class documented for task.py's own git-touching tests.)
+def test_land_reconciles_dirty_task_state_before_landing() -> None:
+    land = (REPO / "cli" / "land.py").read_text()
+    assert 'RECONCILABLE = {"task_list.json", "progress.txt"}' in land
+    assert "_reconcile_dirty_state" in land, "land.py must reconcile, not just refuse"
+
+
+def test_land_still_refuses_other_dirty_files() -> None:
+    land = (REPO / "cli" / "land.py").read_text()
+    assert "dirty <= RECONCILABLE" in land, "only task_list.json/progress.txt may auto-reconcile"
+
+
 # --- task.py add must allocate ids off main, not a stale local copy --------
 # (worktree-per-task means every worktree forks its own snapshot of task_list.json;
 # `_next_id()` used to read that local copy, so two worktrees adding a task around
