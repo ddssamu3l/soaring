@@ -47,6 +47,7 @@ is the user's call.
 - `check_all.py` — run the deterministic gate to pre-check before committing.
 - `review.py --base main` — standalone AI review (`land` runs it for you).
 - `land.py <branch>` — land a finished branch (gate + review + merge + rollback + mark-done).
+- `menu.py` — print the human cheat-sheet: every CLI, the automatic hooks, and the escape hatches.
 
 **Task↔branch binding = the BRANCH NAME.** `feature/<taskid>-<slug>` → `land.py` derives
 `tN` and marks it done on a green merge (no flag to remember). `--task tN` overrides for
@@ -59,7 +60,11 @@ exception you set up by hand the first time you actually hit it (there is no sta
 worktree tooling; build it only if it recurs). Your harness will also offer worktrees
 (`Agent isolation:worktree`, ultracode): fine for **read-only** fan-out (explore / research
 / review that never commits here); **never** for agents that write code — those stay on the
-coordinator's one branch. If you're unsure, you don't need a worktree.
+coordinator's one branch. If you're unsure, you don't need a worktree. If you *do* run two
+write-sessions, give each its **own** checkout (worktree) — never share one, or their edits,
+branch switches, and staged index collide. `land.py` works from any worktree (its lock lives
+in the shared git dir, so concurrent lands serialize); mutate `task_list.json` from only ONE
+of them (single-writer is global — see the task-state note in scripts/README.md).
 
 **What's enforced (work WITH it, don't fight it):**
 - **No direct commits to `main`** — the pre-commit hook refuses them; real work goes on a
@@ -70,8 +75,9 @@ coordinator's one branch. If you're unsure, you don't need a worktree.
   doc-coupling, docs-generated. Avoid needless failures: write the test file alongside the
   code, `ruff format` first, no `TODO/FIXME/XXX`, files < 600 lines, new non-exempt `.py` ⇒
   `tests/test_<name>.py`, and **regenerate docs after changing a CLI** (`gen_docs.py`).
-- **`task_list.json` is edit-locked** — a PreToolUse hook blocks direct Edit/Write.
-  Change it ONLY via `task.py` (enforces one-active-task, deps, real-commit-for-done).
+- **`task_list.json` and `progress.txt` are edit-locked** — a PreToolUse hook blocks direct
+  Edit/Write. Change them ONLY via their CLI: `task.py` (enforces one-active-task, deps,
+  real-commit-for-done) and `log.py` (append-only, auto-stamped). Break-glass: `ALLOW_STATE_EDIT=1`.
 - **`land.py`** serializes via a file lock, re-gates the *merged* result + the merge delta,
   runs the AI review, and **rolls main back on ANY failure**.
 - **No direct `git merge` into `main`** — a `pre-merge-commit` hook refuses it (main moves
@@ -109,7 +115,7 @@ usage: task.py done [-h] --commit COMMIT id
 
 usage: task.py block [-h] --reason REASON id
 
-usage: task.py list [-h]
+usage: task.py list [-h] [-v]
 
 usage: task.py next [-h]
 

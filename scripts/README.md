@@ -8,6 +8,9 @@ The scaffold that lets agents work on this repo safely. Two layers:
 > Full human reference for the toolchain. The condensed, always-loaded version lives
 > in `.claude/rules/agentic-workflow.md`; this is the deeper dive.
 
+**Quick menu:** `python3 scripts/menu.py` prints every CLI, the automatic hooks, and the
+escape hatches at a glance — the fastest way to see what you can run.
+
 ---
 
 ## Durable session state (the anti-amnesia layer)
@@ -30,7 +33,8 @@ python3 scripts/task.py add --title "Log a dataset" --deps t1,t2 --files "data_g
 python3 scripts/task.py start t2          # -> active   (refuses if another task is active)
 python3 scripts/task.py done  t2 --commit <sha>   # -> done (sha must exist in git)
 python3 scripts/task.py block t2 --reason "sim API changed"
-python3 scripts/task.py list              # status board
+python3 scripts/task.py list              # status board — progress bar, deps, next-up (colorized on a TTY)
+python3 scripts/task.py list --full       # + each task's notes, files, and the roadmap framing
 python3 scripts/task.py next              # the next pickable task
 ```
 
@@ -42,7 +46,10 @@ Break-glass for a human to hand-edit anyway: `ALLOW_STATE_EDIT=1`.
 python3 scripts/log.py "t2 started — plan: 2-layer MLP, MSE, keystone plot is the deliverable"
 ```
 
-Auto-stamps date + active task + git sha. Append-only, low risk, no hard guard.
+Auto-stamps date + active task + git sha. Append-only. Like `task_list.json`, the file is
+edit-locked by the `guard_state.py` PreToolUse hook — direct Edit/Write is blocked, so
+`log.py` is the door (break-glass: `ALLOW_STATE_EDIT=1`). The hook only catches the *tool*,
+not this CLI's own write.
 
 ### `rehydrate.py` — resume from disk
 
