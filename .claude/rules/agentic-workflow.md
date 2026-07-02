@@ -5,7 +5,10 @@ This is a **tracked** rule (loads every session like CLAUDE.md, but versioned so
 
 **Mental model.** State lives on disk, NOT the conversation — `task_list.json` (work
 order) + `progress.txt` (narrative log) + git history. Conversation is scratch; a session
-can die anytime and the next resumes from disk. **Single-writer: exactly ONE `active` task
+can die anytime and the next resumes from disk. `progress.txt` merges via git's builtin
+`union` driver (`.gitattributes`) so two branches that both appended while diverged
+merge cleanly with no conflict; `task_list.json` has no such driver (it's JSON) and
+falls back to `land.py`'s reconcile path or manual resolution. **Single-writer: exactly ONE `active` task
 at a time — one branch, one task.** Every task gets its **own dedicated worktree**
 (`../soaring-<taskid>`, standing default — see "Parallelism" below): this makes a task's
 checkout disposable and never collides with any other session's WIP, whether or not
