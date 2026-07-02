@@ -91,14 +91,15 @@ of them (single-writer is global — see the task-state note in scripts/README.m
 
 **Escape hatches (human break-glass — agents do NOT self-exempt):**
 `ALLOW_EXEMPT=1` add a `.test-exempt` entry · `ALLOW_NO_TEST_UPDATE=1` edit a source without
-its test · `ALLOW_STATE_EDIT=1` hand-edit `task_list.json` · `ALLOW_NO_DOC_UPDATE=1`
+its test · `ALLOW_STATE_EDIT=1` hand-edit `task_list.json` or `progress.txt` · `ALLOW_NO_DOC_UPDATE=1`
 change a script without touching docs · `ALLOW_MAIN_COMMIT=1` commit directly to main ·
 `ALLOW_DIRECT_MERGE=1` merge into main without `land.py` · `BREAK_GLASS=1` force-approve
 the AI review.
 
 **Guarantees you can rely on:** every commit is gated; every land re-gates + AI-reviews
 before main moves; **main cannot move any other way** — a direct commit *or* a raw `git merge`
-into main is refused by a hook, so the judge is un-skippable; state changes only through `task.py`; a fresh/compacted session is
+into main is refused by a hook, so the judge is un-skippable; state changes only through their
+CLIs (`task_list.json` via `task.py`, `progress.txt` via `log.py`); a fresh/compacted session is
 auto-rehydrated from disk; the CLI reference below can't drift (it's generated from the
 scripts' own `--help`).
 
@@ -126,6 +127,8 @@ usage: review.py [-h] [--base BASE] [--staged]
 usage: log.py [-h] message [message ...]
 
 usage: rehydrate.py [-h] [--hook]
+
+usage: menu.py [-h]
 ```
 <!-- END cli-reference -->
 Regenerate after changing any CLI: `python3 scripts/gen_docs.py` (the `docs-generated`

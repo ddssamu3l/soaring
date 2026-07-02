@@ -64,6 +64,17 @@ def _next_id(data: dict[str, Any]) -> str:
     return f"t{n}"
 
 
+def _next_pickable(data: dict[str, Any]) -> dict[str, Any] | None:
+    """The next pickable task: the first pending task whose deps are all done.
+    The SINGLE source of the pickability rule — both `list` (its `← next` marker)
+    and `next` read it, so the board and `task.py next` can never diverge."""
+    done_ids = {t["id"] for t in data["tasks"] if t["status"] == "done"}
+    return next(
+        (t for t in data["tasks"] if t["status"] == "pending" and set(t["deps"]) <= done_ids),
+        None,
+    )
+
+
 def _git_has(sha: str) -> bool:
     return (
         subprocess.run(["git", "cat-file", "-e", sha], cwd=REPO, capture_output=True).returncode
@@ -173,11 +184,8 @@ def cmd_list(a: argparse.Namespace) -> int:
     total = len(tasks)
     counts = {s: sum(1 for t in tasks if t["status"] == s) for s in _ST_CODE}
     done_ids = {t["id"] for t in tasks if t["status"] == "done"}
-    # the next pickable task: first pending whose deps are all done
-    next_id = next(
-        (t["id"] for t in tasks if t["status"] == "pending" and set(t["deps"]) <= done_ids),
-        None,
-    )
+    nxt = _next_pickable(data)  # same rule as `task.py next` — one source, no drift
+    next_id = nxt["id"] if nxt else None
 
     # header: a progress bar + status counts, each tinted by its status colour
     barw = 12
@@ -246,10 +254,10 @@ def cmd_next(_: argparse.Namespace) -> int:
     if active:
         print(f"active: {active['id']}: {active['title']}")
         return 0
-    for t in data["tasks"]:
-        if t["status"] == "pending" and all(_status(data, d) == "done" for d in t["deps"]):
-            print(f"next: {t['id']}: {t['title']}")
-            return 0
+    t = _next_pickable(data)
+    if t:
+        print(f"next: {t['id']}: {t['title']}")
+        return 0
     print("(nothing pickable — all done, or remaining tasks are blocked/waiting on deps)")
     return 0
 

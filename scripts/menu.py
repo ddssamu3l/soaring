@@ -89,7 +89,7 @@ HATCHES: list[tuple[str, str]] = [
     ("ALLOW_EXEMPT=1", "add a .test-exempt entry"),
     ("ALLOW_NO_TEST_UPDATE=1", "edit a source without touching its test"),
     ("ALLOW_NO_DOC_UPDATE=1", "change a script without touching docs"),
-    ("ALLOW_STATE_EDIT=1", "hand-edit task_list.json"),
+    ("ALLOW_STATE_EDIT=1", "hand-edit task_list.json or progress.txt"),
     ("BREAK_GLASS=1", "force-approve the AI review"),
 ]
 

@@ -20,10 +20,15 @@ import os
 import sys
 from pathlib import Path
 
-# file name -> the CLI that is allowed to change it
+REPO = Path(__file__).resolve().parent.parent
+
+# the guarded state file (resolved, absolute) -> the CLI allowed to change it.
+# Keyed by the REPO's actual file, not a bare name, so we lock only this repo's
+# state — an unrelated file that happens to be named progress.txt elsewhere
+# (e.g. /tmp, an additional working dir) is NOT blocked.
 GUARDED = {
-    "task_list.json": "python3 scripts/task.py",
-    "progress.txt": "python3 scripts/log.py",
+    (REPO / "task_list.json").resolve(): "python3 scripts/task.py",
+    (REPO / "progress.txt").resolve(): "python3 scripts/log.py",
 }
 
 
@@ -35,10 +40,13 @@ def main() -> int:
     except (json.JSONDecodeError, ValueError):
         return 0  # can't parse the hook input -> don't interfere
     file_path = (payload.get("tool_input") or {}).get("file_path", "")
-    name = Path(file_path).name if file_path else ""
-    if name in GUARDED:
+    if not file_path:
+        return 0
+    target = Path(file_path).resolve()
+    cli = GUARDED.get(target)
+    if cli:
         print(
-            f"Blocked: change {name} only via `{GUARDED[name]}` (it enforces the state "
+            f"Blocked: change {target.name} only via `{cli}` (it enforces the state "
             "invariants). Human break-glass: ALLOW_STATE_EDIT=1.",
             file=sys.stderr,
         )
