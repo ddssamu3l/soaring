@@ -241,6 +241,17 @@
       ],
       "commit": "e1f618d37de4b10ab33b76d08d1692b1f6d70ab0",
       "notes": "AI review on t20 flagged: _reconcile_dirty_state accepts any porcelain status on the two state files, including deletion (' D task_list.json'), which git add would stage and auto-commit to main. Scaffold's own tools only ever produce modifications; a deletion signals something went wrong and should fall back to the hard-refuse branch. Fix: parse the porcelain status code, only reconcile M/A (modified/added), not D."
+    },
+    {
+      "id": "t22",
+      "title": "task.py begin \u2014 claim + create the worktree in one step",
+      "status": "pending",
+      "deps": [],
+      "files": [
+        "cli/task.py"
+      ],
+      "commit": null,
+      "notes": "Right now claiming a task is 3 manual steps: task.py start tN, hand-derive a slug + git worktree add ../soaring-tN -b feature/tN-<slug> main, then cd. Add task.py begin tN: does start's claim, derives the branch slug from the task title automatically, creates the worktree, and prints the cd command to run next. True teleportation isn't possible (a subprocess can't cd the parent shell), so this collapses it to 'run one command, then cd' instead of 3 manual steps. task.py start stays available standalone for off-convention cases."
     }
   ]
 }
