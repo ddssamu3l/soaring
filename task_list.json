@@ -141,7 +141,7 @@
     {
       "id": "t13",
       "title": "Flight replay viewport (pygame) \u2014 scrub/step/play logged episodes + instruments",
-      "status": "pending",
+      "status": "active",
       "deps": [
         "t1"
       ],
