@@ -9,3 +9,4 @@
 
 fly.py       # plotting entrypoint — no meaningful unit test
 scripts/     # the gate + orchestration tooling itself
+cli/         # CLI entrypoints for the agentic toolchain — thin argparse wrappers

@@ -3,7 +3,7 @@
     "SessionStart": [
       {
         "hooks": [
-          { "type": "command", "command": "python3 scripts/rehydrate.py --hook" }
+          { "type": "command", "command": "python3 cli/rehydrate.py --hook" }
         ]
       }
     ],

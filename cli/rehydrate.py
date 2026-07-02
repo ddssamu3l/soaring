@@ -3,7 +3,7 @@
 context can resume from disk instead of guessing.
 
 Two uses:
-  * manually:  python3 scripts/rehydrate.py         (read the board anytime)
+  * manually:  python3 cli/rehydrate.py         (read the board anytime)
   * SessionStart hook (`--hook`): its stdout is injected into the new context, so
     after compaction the session reopens already knowing where it is.
 
@@ -86,7 +86,7 @@ def build() -> str:
 
     out.append(
         "\nResume an ACTIVE task if one exists; if none, propose the NEXT task and await "
-        "the user's go before starting it. Mutate state ONLY via scripts/task.py."
+        "the user's go before starting it. Mutate state ONLY via cli/task.py."
     )
     return "\n".join(out)
 

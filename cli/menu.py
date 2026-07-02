@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """menu.py -- the human cheat-sheet for the agentic toolchain.
 
-Run `python3 scripts/menu.py` to see every CLI you can use in this repo, what each does,
+Run `python3 cli/menu.py` to see every CLI you can use in this repo, what each does,
 the one command you'll reach for most, plus the hooks that fire on their own and the
 break-glass env vars. This is the FRIENDLY overview; the authoritative CLI signatures are
 in the generated block in .claude/rules/agentic-workflow.md (regenerate with gen_docs.py),
@@ -25,7 +25,7 @@ SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
         "SESSION",
         [
             (
-                "python3 scripts/rehydrate.py",
+                "python3 cli/rehydrate.py",
                 "print the board — active/next task, recent progress, recent commits",
             ),
         ],
@@ -33,22 +33,22 @@ SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
     (
         "WORK ORDER  (state — the ONLY sanctioned way to touch task_list.json)",
         [
-            ("python3 scripts/task.py next", "show the next pickable task"),
+            ("python3 cli/task.py next", "show the next pickable task"),
             (
-                "python3 scripts/task.py list",
+                "python3 cli/task.py list",
                 "status board — progress bar, deps, next-up  (add --full for notes + framing)",
             ),
-            ("python3 scripts/task.py start t1", "claim a task — single-writer; checks deps"),
+            ("python3 cli/task.py start t1", "claim a task — single-writer; checks deps"),
             (
-                'python3 scripts/task.py add --title "…" --deps t1 --files "x.py"',
+                'python3 cli/task.py add --title "…" --deps t1 --files "x.py"',
                 "append a new pending task",
             ),
-            ('python3 scripts/task.py block t1 --reason "…"', "mark a task blocked"),
+            ('python3 cli/task.py block t1 --reason "…"', "mark a task blocked"),
             (
-                "python3 scripts/task.py done t1 --commit <sha>",
+                "python3 cli/task.py done t1 --commit <sha>",
                 "mark done — rare by hand; land.py does it for you",
             ),
-            ('python3 scripts/log.py "t1 started — plan: …"', "stamped note to progress.txt"),
+            ('python3 cli/log.py "t1 started — plan: …"', "stamped note to progress.txt"),
         ],
     ),
     (
@@ -58,13 +58,13 @@ SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
                 ".venv/bin/python scripts/check_all.py",
                 "run the deterministic gate (11 checks) — pre-check before committing",
             ),
-            ("python3 scripts/review.py --base main", "run the AI judge standalone"),
+            ("python3 cli/review.py --base main", "run the AI judge standalone"),
             (
-                "python3 scripts/land.py feature/t1-dataset",
+                "python3 cli/land.py feature/t1-dataset",
                 "merge queue: gate → judge → merge → rollback-on-fail → mark task done",
             ),
             (
-                "python3 scripts/gen_docs.py",
+                "python3 cli/gen_docs.py",
                 "regenerate the CLI reference after changing any CLI",
             ),
         ],
@@ -94,12 +94,12 @@ HATCHES: list[tuple[str, str]] = [
 ]
 
 FLOW: list[str] = [
-    "python3 scripts/task.py start t1               # claim it (single-writer)",
+    "python3 cli/task.py start t1               # claim it (single-writer)",
     "git checkout -b feature/t1-dataset             # branch name carries the task id",
-    'python3 scripts/log.py "t1 started — plan: …"',
+    'python3 cli/log.py "t1 started — plan: …"',
     "#   … write code AND its test; git commit  (pre-commit runs check_all) …",
     "git checkout main",
-    "python3 scripts/land.py feature/t1-dataset     # on your go: gate + judge + merge",
+    "python3 cli/land.py feature/t1-dataset     # on your go: gate + judge + merge",
 ]
 
 
@@ -109,7 +109,7 @@ def _hdr(title: str) -> str:
 
 def render() -> str:
     out: list[str] = []
-    out.append(f"\n{BOLD}soaring — toolchain menu{RESET}  {DIM}(python3 scripts/menu.py){RESET}")
+    out.append(f"\n{BOLD}soaring — toolchain menu{RESET}  {DIM}(python3 cli/menu.py){RESET}")
 
     for title, rows in SECTIONS:
         out.append(_hdr(title))

@@ -48,7 +48,7 @@ def test_hook_resolves_interpreter_from_shared_repo() -> None:
 
 # --- Fix 3: review must bound the reviewer call --------------------------
 def test_review_caps_claude_with_a_timeout() -> None:
-    review = (REPO / "scripts" / "review.py").read_text()
+    review = (REPO / "cli" / "review.py").read_text()
     assert "timeout=CLAUDE_TIMEOUT" in review, "review.py must pass a timeout to claude"
 
 
@@ -67,5 +67,5 @@ def test_pre_merge_commit_hook_guards_main() -> None:
 def test_land_sets_the_merge_sentinel() -> None:
     # land.py's own merge has to pass the pre-merge-commit guard, so it must set the
     # sentinel the hook checks for.
-    land = (REPO / "scripts" / "land.py").read_text()
+    land = (REPO / "cli" / "land.py").read_text()
     assert 'LAND_ACTIVE"] = "1"' in land, "land.py must set LAND_ACTIVE so its merge passes"

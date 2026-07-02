@@ -9,9 +9,9 @@ dream team to review a typo), runs scoped sub-reviewers, then fuses their findin
 with a coordinator that dedupes, drops nitpicks, and biases toward approval.
 
 Usage:
-    python scripts/review.py --base main          # review main..HEAD
-    python scripts/review.py --staged             # review staged changes
-    BREAK_GLASS=1 python scripts/review.py --base main   # force approve
+    python cli/review.py --base main          # review main..HEAD
+    python cli/review.py --staged             # review staged changes
+    BREAK_GLASS=1 python cli/review.py --base main   # force approve
 
 Exit 0 = APPROVE, 2 = BLOCK, 1 = infra error (claude missing, etc.).
 """
@@ -91,7 +91,7 @@ def risk_tier(diff: str) -> list[str]:
     else:
         roles = ["correctness", "ml-integrity", "quality"]  # full pipeline
     # docs-integrity: whenever a script/CLI changes, verify the docs kept up (see #5)
-    if re.search(r"^\+\+\+ b/scripts/.*\.py", diff, re.MULTILINE):
+    if re.search(r"^\+\+\+ b/(scripts|cli)/.*\.py", diff, re.MULTILINE):
         roles.append("docs")
     return roles
 

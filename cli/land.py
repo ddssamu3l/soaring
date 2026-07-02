@@ -23,8 +23,8 @@ binds the task, so `land feature/t1-dataset` runs `task.py done t1` on success
 (override with --task tN). Best-effort -- a bookkeeping mismatch never undoes a merge.
 
 Usage (run from the checkout, on a clean main):
-    python scripts/land.py feature/t1-dataset      # derives + marks t1 done
-    python scripts/land.py my-branch --task t1      # explicit task binding
+    python cli/land.py feature/t1-dataset      # derives + marks t1 done
+    python cli/land.py my-branch --task t1      # explicit task binding
 
 The loop: task.py start -> git checkout -b feature/<taskid>-<slug> -> commit
 (pre-commit runs check_all) -> git checkout main -> land.py.
@@ -40,9 +40,10 @@ import subprocess
 import sys
 from pathlib import Path
 
-import check_all  # sibling in scripts/ (on sys.path); shares the policy logic
-
 REPO = Path(__file__).resolve().parent.parent
+
+sys.path.insert(0, str(REPO / "scripts"))  # check_all.py lives there, not next to us
+import check_all  # noqa: E402  -- shares the policy logic with the commit-time gate
 
 
 def _common_git_dir() -> Path:
@@ -145,7 +146,7 @@ def land(branch: str, task: str | None = None) -> int:
 
     # 5. AI review of exactly what this landing adds -----------------------
     print("\n── AI review ──")
-    if subprocess.run([str(PY), "scripts/review.py", "--base", before], cwd=REPO).returncode != 0:
+    if subprocess.run([str(PY), "cli/review.py", "--base", before], cwd=REPO).returncode != 0:
         return rollback("review BLOCKED the merge.")
 
     # 6. success -----------------------------------------------------------
@@ -161,11 +162,11 @@ def land(branch: str, task: str | None = None) -> int:
     if task:
         merged = out(["rev-parse", "HEAD"])
         r = subprocess.run(
-            [sys.executable, str(REPO / "scripts" / "task.py"), "done", task, "--commit", merged],
+            [sys.executable, str(REPO / "cli" / "task.py"), "done", task, "--commit", merged],
             cwd=REPO,
         )
         if r.returncode != 0:
-            print(f"⚠️  merged, but couldn't mark {task} done — fix via scripts/task.py.")
+            print(f"⚠️  merged, but couldn't mark {task} done — fix via cli/task.py.")
 
     print(f"\n\033[32mLANDED\033[0m {branch} → main  ({out(['rev-parse', '--short', 'HEAD'])})")
     return 0

@@ -1,1 +1,3 @@
 2026-06-30  [- 861dd54]  Agentic setup scaffolded: deterministic gate (check_all, 9 gates), AI reviewer (review.py), serialized merge queue (land.py), and durable session-state tooling (task.py + guard hook + rehydrate + log.py). Roadmap seeded into task_list.json (t1..t9). Next up: t1 — log a dataset from the sim.
+2026-07-01  [t10 e81f0c5]  t10 started — plan: move CLIs into cli/ folder so gen_docs auto-discovers them
+2026-07-01  [t10 e81f0c5]  t10: moved CLIs (task/land/review/log/rehydrate/menu/gen_docs) into cli/; gen_docs.py now globs cli/*.py instead of a hardcoded list; check_all is a self-check via ALLOW_EXEMPT=1 (cli/ exempted like scripts/ was)
