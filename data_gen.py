@@ -2,121 +2,162 @@
 data_gen.py -- turn the sim into a DATA FACTORY (roadmap step 1 / task t1).
 
 Runs many rollouts in ONE fixed world (the steps-1-4 regime: a single frozen
-thermal), flying randomized bank angles, and logs every tick as a training row:
+thermal), flying randomized stick commands, and logs every tick as a row:
 
-    (state_t, action_t, next_state_t+1, vario_t)
+    (true_state_t, action_t, sensors_t, true_state_t+1)
 
 saved as parallel NumPy arrays in a compressed .npz. This file is the training
-and test set for step 2's MLP: `(state, action) -> next_state`.
+and test set for step 2's MLP.
 
-Design decisions (each one is deliberate; the ledger tracks them):
-  - RAW values only. No normalization, no delta-encoding, no feature scaling --
-    those are MODELING choices and belong to step 2. Logging stays pure so the
-    dataset bakes in zero assumptions.
-  - PIECEWISE-CONSTANT random banks: sample a bank, HOLD it ~1 s, resample.
-    Per-tick random banks would average to zero net turn (straight-ish wiggly
-    lines); real controllers fly sustained arcs. Holding gives the dataset the
-    curved, circling trajectories the MLP must learn to predict.
-  - EPISODE ids logged per row. Step 2 must split train/test BY ROLLOUT --
-    adjacent rows within one rollout are nearly identical, so a random row-level
-    split would leak test data into training and fake a good result.
-  - VARIO logged but NOT needed by step 2's inputs (fixed field: position alone
-    determines lift, so (state, action) suffices). It's here so the SAME dataset
-    format survives step 5, when the field varies and sensed lift becomes the
-    only honest world-channel.
+WHO EATS WHAT (the naming convention carries the firewall):
+    sensors + actions (+ Glider params)  ->  model food
+    true_states / true_next_states       ->  evaluation ONLY (the answer key)
+  Anything `true_*` in a model's input diet is a bug by definition. In the
+  fixed-field phase sensors[:, :6] literally mirror the true kinematics (self
+  is fully observable through the panel) -- the discipline costs nothing now,
+  and at step 5 it's the whole experiment.
 
-THE FIREWALL (the invariant that keeps every future result real):
-  The Simulation is omniscient -- it owns the true ThermalMap. A learner is NOT.
-  Rows are packed by `rows_from_rollout()`, whose inputs are ONLY the glider's
-  own trajectory (state, bank, vario per tick) -- it cannot see the Simulation
-  or ThermalMap, so the thermal's true (x0, y0, w_peak, radius) has no path
-  into the dataset. The saved file contains: own kinematics, action, sensed
-  vario, episode id, and airframe/sim constants. Never thermal truth.
+Design decisions (each deliberate; logged in progress.txt):
+  - RAW values, one tick per row. No normalization, no deltas, no K-step
+    jumps -- those are MODELING choices and belong to step 2. Multi-step
+    consequences live in the data as contiguous episodes (chain the rows);
+    K-step pairs are derivable downstream, the reverse is impossible.
+  - PIECEWISE-CONSTANT commands: sample a (bank_cmd, pitch_cmd), HOLD ~1 s,
+    resample. With command lag this is load-bearing: actions need time for
+    their consequences to materialize (roll-in arcs, zooms, stalls). Per-tick
+    resampling would jitter around neutral and never complete a maneuver.
+  - Command ranges deliberately reach into stall territory (slow pitch_cmd),
+    so the dataset CONTAINS stalls -- the model must learn the wing quitting.
+  - EPISODE ids per row; episodes end EARLY on ground impact (variable
+    length). Step 2 must split train/test BY EPISODE -- adjacent rows are
+    nearly identical, so a row-level split would leak and fake a good result.
+  - SELF-DESCRIBING file: channel name arrays (state/action/sensor/param) are
+    stored inside the .npz, so future sessions read structure from the file,
+    never from memory of this code.
 
 Run it:
     .venv/bin/python data_gen.py     ->  data/dataset.npz  (+ a sanity summary)
 """
 
+from dataclasses import fields
 from pathlib import Path
 
 import numpy as np
 import numpy.typing as npt
 
-from glider_sim import Glider, GliderState, Simulation, Thermal, ThermalMap
+from glider_sim import (
+    ACTION_NAMES,
+    SENSOR_NAMES,
+    STATE_NAMES,
+    Glider,
+    GliderState,
+    Simulation,
+    Thermal,
+    ThermalMap,
+)
 
 FloatArray = npt.NDArray[np.float64]
 IntArray = npt.NDArray[np.int64]
-# one dataset = named parallel arrays (rows) + 0-d scalars (metadata)
-Dataset = dict[str, FloatArray | IntArray]
+StrArray = npt.NDArray[np.str_]
+# one dataset = named parallel arrays (rows) + name arrays + 0-d scalars
+Dataset = dict[str, FloatArray | IntArray | StrArray]
 
 DEFAULT_OUT = Path(__file__).parent / "data" / "dataset.npz"
 
+# command-sampling ranges: banks cover both turn directions; speeds run from
+# below stall (so stalls happen and get logged) up to fast cruise.
+MAX_BANK_CMD = np.radians(50.0)
+SPEED_CMD_RANGE = (15.0, 35.0)  # m/s; stall is ~16, so the slow end mushes
+
 
 def make_world() -> tuple[Glider, ThermalMap]:
-    """THE fixed world of steps 1-4: one thermal at the origin, no wind, and the
+    """THE fixed world of steps 1-4: one thermal at the origin, no wind, and
     one default airframe. Every rollout flies this exact world, so the MLP can
     absorb the field into its weights (that's the point of the fixed-field
     phase). Randomizing worlds/gliders is step 5's job, and it happens HERE.
     """
-    glider = Glider()  # airspeed 15 m/s, base sink 0.7 m/s
+    glider = Glider()  # ASK-21-class trainer (see glider_sim.Glider)
     air = ThermalMap(thermals=[Thermal(x0=0.0, y0=0.0, w_peak=4.0, radius=60.0)])
     return glider, air
 
 
 def random_start(rng: np.random.Generator) -> GliderState:
     """A random spawn: anywhere in a +/-150 m box around the thermal (radius
-    60 m), any heading. That covers the three regimes the MLP must learn --
-    strong core, gradient edge, dead air. Altitude varies too: z is dynamically
-    IRRELEVANT in v1 (nothing depends on it), and spawning at different
-    altitudes keeps z decorrelated from time-in-episode so the MLP can discover
-    that irrelevance instead of inheriting a spurious pattern.
+    60 m) -- covering strong core, gradient edge, and dead air -- at any
+    heading, wings level, at a healthy random airspeed. Altitude varies so z
+    stays decorrelated from time-in-episode (z is dynamically irrelevant in
+    the fixed field; the MLP should get the chance to discover that).
     """
     return GliderState(
         x=float(rng.uniform(-150.0, 150.0)),
         y=float(rng.uniform(-150.0, 150.0)),
         z=float(rng.uniform(300.0, 700.0)),
         heading=float(rng.uniform(0.0, 2.0 * np.pi)),
+        airspeed=float(rng.uniform(18.0, 30.0)),
+        bank=0.0,
     )
 
 
-def sample_banks(
-    rng: np.random.Generator, n_steps: int, hold_steps: int, max_bank: float
-) -> FloatArray:
-    """A piecewise-constant bank schedule: one uniform draw in [-max, +max] per
-    block of `hold_steps` ticks. Negative = left turns, positive = right, so
-    coverage is symmetric.
+def sample_commands(
+    rng: np.random.Generator, n_steps: int, hold_steps: int
+) -> tuple[FloatArray, FloatArray]:
+    """Piecewise-constant stick schedules: one (bank_cmd, pitch_cmd) draw per
+    block of `hold_steps` ticks, held so consequences complete (see module
+    docstring). Bank covers both signs; pitch_cmd is a target AIRSPEED (m/s).
     """
     n_blocks = -(-n_steps // hold_steps)  # ceil division
-    levels = rng.uniform(-max_bank, max_bank, size=n_blocks)
-    return np.repeat(levels, hold_steps)[:n_steps].astype(np.float64)
+
+    def held(levels: FloatArray) -> FloatArray:
+        return np.repeat(levels, hold_steps)[:n_steps].astype(np.float64)
+
+    banks = rng.uniform(-MAX_BANK_CMD, MAX_BANK_CMD, size=n_blocks)
+    speeds = rng.uniform(SPEED_CMD_RANGE[0], SPEED_CMD_RANGE[1], size=n_blocks)
+    return held(banks), held(speeds)
+
+
+def fly_rollout(sim: Simulation, banks: FloatArray, speeds: FloatArray) -> None:
+    """Fly one rollout: step through the command schedules, stopping early if
+    the glider hits the ground (the flight is over; shorter episode logged)."""
+    for bank_cmd, pitch_cmd in zip(banks, speeds, strict=True):
+        if sim.crashed:
+            break
+        sim.step(float(bank_cmd), float(pitch_cmd))
 
 
 def rows_from_rollout(
-    history: list[tuple[GliderState, float, float]], final_state: GliderState
+    history: list[tuple[GliderState, tuple[float, float], dict[str, float]]],
+    final_state: GliderState,
 ) -> tuple[FloatArray, FloatArray, FloatArray, FloatArray]:
-    """Flatten one finished rollout into aligned row arrays.
+    """Flatten one finished rollout into aligned row arrays:
+    (true_states, actions, sensors, true_next_states).
 
-    FIREWALL: this is the only function that builds dataset rows, and its inputs
-    are ONLY the flown trajectory -- `Simulation.history` rows (state_t, bank_t,
-    vario_t) plus the final state. No Simulation, no ThermalMap in the
-    signature, so thermal truth is structurally unreachable from here.
+    FIREWALL: this is the only function that builds dataset rows, and its
+    inputs are ONLY the flown trajectory -- `Simulation.history` rows
+    (state_t, commands_t, panel_t) plus the final state. No Simulation, no
+    ThermalMap in the signature, so thermal truth is structurally unreachable.
 
-    history[i+1]'s state IS the state after step i, so next_state rows come from
-    shifting history by one and closing with `final_state`.
+    history[i+1]'s state IS the state after step i, so next-state rows come
+    from shifting history by one and closing with `final_state`. Channel
+    orders come from glider_sim's canonical *_NAMES tuples.
     """
-    states = np.array([[s.x, s.y, s.z, s.heading] for s, _, _ in history], dtype=np.float64)
-    actions = np.array([bank for _, bank, _ in history], dtype=np.float64)
-    varios = np.array([vario for _, _, vario in history], dtype=np.float64)
+    true_states = np.array(
+        [[getattr(s, n) for n in STATE_NAMES] for s, _, _ in history], dtype=np.float64
+    )
+    actions = np.array([list(a) for _, a, _ in history], dtype=np.float64)
+    sensors = np.array(
+        [[panel[n] for n in SENSOR_NAMES] for _, _, panel in history], dtype=np.float64
+    )
     nexts = [s for s, _, _ in history[1:]] + [final_state]
-    next_states = np.array([[s.x, s.y, s.z, s.heading] for s in nexts], dtype=np.float64)
-    return states, actions, next_states, varios
+    true_next_states = np.array(
+        [[getattr(s, n) for n in STATE_NAMES] for s in nexts], dtype=np.float64
+    )
+    return true_states, actions, sensors, true_next_states
 
 
 def generate_dataset(
     n_rollouts: int = 200,
     steps_per_rollout: int = 600,  # 60 s of flight at dt=0.1
-    hold_steps: int = 10,  # resample the bank every 1 s
-    max_bank_deg: float = 50.0,  # beyond ~50 deg the sink penalty explodes
+    hold_steps: int = 10,  # resample the stick every 1 s
     dt: float = 0.1,
     seed: int = 0,
     out_path: str | Path | None = DEFAULT_OUT,
@@ -125,37 +166,45 @@ def generate_dataset(
     optionally save) the dataset. Fully deterministic for a given seed.
 
     Saved/returned keys:
-      states       (N, 4) float64 -- own kinematics (x, y, z, heading) at t
-      actions      (N,)   float64 -- bank angle commanded at t (radians)
-      next_states  (N, 4) float64 -- own kinematics at t+1 (the target)
-      varios       (N,)   float64 -- sensed local lift at t (m/s) [see docstring]
-      episode      (N,)   int64   -- rollout id, for leak-free train/test splits
-      dt, airspeed, base_sink, seed -- 0-d scalars: sim + airframe constants
-        (airframe params are the proposal-1 input channel -- constant, hence
-        inert, until gliders are randomized ~step 5)
+      true_states, true_next_states  (N, 6) -- answer key: EVALUATION ONLY
+      sensors                        (N, 8) -- the panel: model food
+      actions                        (N, 2) -- the commands: model food
+      episode                        (N,)   -- rollout id (split by this!)
+      state_names, action_names, sensor_names -- channel orders, in-file
+      glider_params, glider_param_names -- the airframe (proposal-1 channel:
+        constant, hence inert, until gliders are randomized ~step 5)
+      dt, seed -- sim constants
     """
     rng = np.random.default_rng(seed)
     glider, air = make_world()
-    max_bank = float(np.radians(max_bank_deg))
 
     per_ep: list[tuple[FloatArray, FloatArray, FloatArray, FloatArray]] = []
     episode_ids: list[IntArray] = []
+    n_crashed = 0
     for ep in range(n_rollouts):
         sim = Simulation(glider, air, random_start(rng), dt=dt)
-        for bank in sample_banks(rng, steps_per_rollout, hold_steps, max_bank):
-            sim.step(float(bank))
+        banks, speeds = sample_commands(rng, steps_per_rollout, hold_steps)
+        fly_rollout(sim, banks, speeds)
+        n_crashed += int(sim.crashed)
         per_ep.append(rows_from_rollout(sim.history, sim.state))
-        episode_ids.append(np.full(steps_per_rollout, ep, dtype=np.int64))
+        episode_ids.append(np.full(len(sim.history), ep, dtype=np.int64))
+
+    # airframe params, straight off the dataclass so names can't drift
+    param_names = tuple(f.name for f in fields(glider))
+    param_values = np.array([getattr(glider, n) for n in param_names], dtype=np.float64)
 
     data: Dataset = {
-        "states": np.concatenate([e[0] for e in per_ep]),
+        "true_states": np.concatenate([e[0] for e in per_ep]),
         "actions": np.concatenate([e[1] for e in per_ep]),
-        "next_states": np.concatenate([e[2] for e in per_ep]),
-        "varios": np.concatenate([e[3] for e in per_ep]),
+        "sensors": np.concatenate([e[2] for e in per_ep]),
+        "true_next_states": np.concatenate([e[3] for e in per_ep]),
         "episode": np.concatenate(episode_ids),
+        "state_names": np.array(STATE_NAMES),
+        "action_names": np.array(ACTION_NAMES),
+        "sensor_names": np.array(SENSOR_NAMES),
+        "glider_params": param_values,
+        "glider_param_names": np.array(param_names),
         "dt": np.array(dt, dtype=np.float64),
-        "airspeed": np.array(glider.airspeed, dtype=np.float64),
-        "base_sink": np.array(glider.base_sink, dtype=np.float64),
         "seed": np.array(seed, dtype=np.int64),
     }
 
@@ -167,14 +216,17 @@ def generate_dataset(
         # channels, and nothing else. (Also: numpy's stubs can't type a **dict.)
         np.savez_compressed(
             path,
-            states=data["states"],
+            true_states=data["true_states"],
             actions=data["actions"],
-            next_states=data["next_states"],
-            varios=data["varios"],
+            sensors=data["sensors"],
+            true_next_states=data["true_next_states"],
             episode=data["episode"],
+            state_names=data["state_names"],
+            action_names=data["action_names"],
+            sensor_names=data["sensor_names"],
+            glider_params=data["glider_params"],
+            glider_param_names=data["glider_param_names"],
             dt=data["dt"],
-            airspeed=data["airspeed"],
-            base_sink=data["base_sink"],
             seed=data["seed"],
         )
     return data
@@ -182,15 +234,15 @@ def generate_dataset(
 
 if __name__ == "__main__":
     dataset = generate_dataset()
-    # Mode-B sanity summary: eyeball these before trusting the file. Ranges that
-    # look wrong here (all-zero vario, altitude exploding) mean a broken factory.
-    z = dataset["states"][:, 2]
-    v = dataset["varios"]
+    # Mode-B sanity summary: eyeball these before trusting the file. Ranges
+    # that look wrong (all-zero varios, altitude exploding, zero crashes with
+    # stall-range commands) mean a broken factory.
+    true_states = np.asarray(dataset["true_states"], dtype=np.float64)
+    panel = np.asarray(dataset["sensors"], dtype=np.float64)
+    z, v, te = true_states[:, 2], true_states[:, 4], panel[:, 7]
+    n_eps = int(np.asarray(dataset["episode"], dtype=np.int64).max()) + 1
     print(f"saved -> {DEFAULT_OUT}  ({DEFAULT_OUT.stat().st_size / 1e6:.1f} MB)")
-    print(f"rows: {len(dataset['actions'])}   episodes: {int(dataset['episode'].max()) + 1}")
-    print(f"altitude range: {z.min():7.1f} .. {z.max():7.1f} m")
-    print(f"vario range:    {v.min():7.2f} .. {v.max():7.2f} m/s")
-    print(
-        f"bank range:     {np.degrees(dataset['actions'].min()):+6.1f} .. "
-        f"{np.degrees(dataset['actions'].max()):+6.1f} deg"
-    )
+    print(f"rows: {len(dataset['actions'])}   episodes: {n_eps}")
+    print(f"altitude: {z.min():7.1f} .. {z.max():7.1f} m")
+    print(f"airspeed: {v.min():7.1f} .. {v.max():7.1f} m/s")
+    print(f"TE vario: {te.min():+7.2f} .. {te.max():+7.2f} m/s")
