@@ -137,6 +137,12 @@ def test_land_still_refuses_other_dirty_files() -> None:
     assert "dirty <= RECONCILABLE" in land, "only task_list.json/progress.txt may auto-reconcile"
 
 
+# --- ...but never auto-commits a DELETED state file (t20 review follow-up) -------
+def test_land_reconcile_refuses_a_deleted_state_file() -> None:
+    land = (REPO / "cli" / "land.py").read_text()
+    assert '"D" in ln[:2]' in land, "a deleted task_list.json/progress.txt must not auto-reconcile"
+
+
 # --- task.py add must allocate ids off main, not a stale local copy --------
 # (worktree-per-task means every worktree forks its own snapshot of task_list.json;
 # `_next_id()` used to read that local copy, so two worktrees adding a task around

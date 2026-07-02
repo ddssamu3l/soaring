@@ -128,7 +128,10 @@ without committing, so the primary routinely carries a local diff in exactly
 these files between a `start` and its matching `land`. If the ONLY dirty
 files are those two, `land.py` folds them into a small self-authorized
 commit before proceeding — no riskier than the done-mark commit it already
-makes. Any OTHER dirty file still hard-refuses, unchanged.
+makes. Any OTHER dirty file still hard-refuses, unchanged — including a
+*deleted* `task_list.json`/`progress.txt`: the scaffold's own tools never
+delete these files, so a deletion is a signal something went wrong, not
+routine WIP, and must not get silently `git add`-ed onto main.
 
 **`land.py` is the ONLY door to main — enforced, not asked.** A raw `git merge` into
 main would bypass the judge *and* `check_all` (the pre-commit hook doesn't fire on
