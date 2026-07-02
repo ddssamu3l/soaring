@@ -94,12 +94,13 @@ HATCHES: list[tuple[str, str]] = [
 ]
 
 FLOW: list[str] = [
-    "python3 cli/task.py start t1               # claim it (single-writer)",
-    "git checkout -b feature/t1-dataset             # branch name carries the task id",
+    "python3 cli/task.py start t1                                 # claim it (single-writer)",
+    "git worktree add ../soaring-t1 -b feature/t1-dataset main   # dedicated checkout",
+    "cd ../soaring-t1",
     'python3 cli/log.py "t1 started — plan: …"',
     "#   … write code AND its test; git commit  (pre-commit runs check_all) …",
-    "git checkout main",
-    "python3 cli/land.py feature/t1-dataset     # on your go: gate + judge + merge",
+    "cd -   # back to the primary checkout, on main",
+    "python3 cli/land.py feature/t1-dataset     # on your go: gate + judge + merge + cleanup",
 ]
 
 

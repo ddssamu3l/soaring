@@ -133,12 +133,19 @@ python3 cli/review.py --base main     # review main..HEAD
 ```bash
 python3 cli/task.py next                       # see what's up
 python3 cli/task.py start t1                    # claim it (single-writer)
-git checkout -b feature/t1-dataset                  # branch per task (one checkout, sequential)
+git worktree add ../soaring-t1 -b feature/t1-dataset main   # dedicated checkout per task (standing default)
+cd ../soaring-t1
 python3 cli/log.py "t1 started — plan: ..."     # note the plan
 # ... write code + its test; commit (pre-commit hook runs check_all) ...
-git checkout main
-python3 cli/land.py feature/t1-dataset --task t1   # gate + review + merge + mark done
+cd -                                            # back to the primary checkout, on main
+python3 cli/land.py feature/t1-dataset --task t1   # gate + review + merge + cleanup + mark done
 ```
+
+Landing a task's worktree isn't something you switch into and out of by hand for
+`land.py` itself — `land.py` always runs from the **primary checkout** (the one that
+stays on `main`), and after a successful land it best-effort removes the branch's
+worktree + the merged local branch, so the task's checkout is disposable once its work
+is on main.
 
 ## What you can rely on to exist
 
