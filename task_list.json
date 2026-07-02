@@ -245,7 +245,7 @@
     {
       "id": "t22",
       "title": "task.py begin \u2014 claim + create the worktree in one step",
-      "status": "pending",
+      "status": "active",
       "deps": [],
       "files": [
         "cli/task.py"
