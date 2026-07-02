@@ -197,6 +197,17 @@
       ],
       "commit": "32b963b9e5d40f5d21c56464551716ccfa8ecf55",
       "notes": "add/block/done can't fix a typo or add context to an existing task's notes without ALLOW_STATE_EDIT. Add 'task.py notes <id> (--set TEXT | --append TEXT)' following start/done/block's local-save pattern (no main-commit needed, land.py reconciles)."
+    },
+    {
+      "id": "t18",
+      "title": "agentic-workflow.md: add notes to the per-command bullet list",
+      "status": "pending",
+      "deps": [],
+      "files": [
+        ".claude/rules/agentic-workflow.md"
+      ],
+      "commit": null,
+      "notes": "AI review on t17 flagged: the 'When to use each command' prose list enumerates every task.py subcommand except notes (added in t17). Docs aren't wrong elsewhere -- generated CLI block + scripts/README.md already cover it -- just this one inventory bullet."
     }
   ]
 }
