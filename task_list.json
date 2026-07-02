@@ -190,12 +190,12 @@
     {
       "id": "t17",
       "title": "task.py notes command \u2014 edit a task's notes after creation",
-      "status": "active",
+      "status": "done",
       "deps": [],
       "files": [
         "cli/task.py"
       ],
-      "commit": null,
+      "commit": "32b963b9e5d40f5d21c56464551716ccfa8ecf55",
       "notes": "add/block/done can't fix a typo or add context to an existing task's notes without ALLOW_STATE_EDIT. Add 'task.py notes <id> (--set TEXT | --append TEXT)' following start/done/block's local-save pattern (no main-commit needed, land.py reconciles)."
     }
   ]
