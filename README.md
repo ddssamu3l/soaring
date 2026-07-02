@@ -24,6 +24,13 @@ uv pip install --python .venv/bin/python numpy matplotlib
 ```
 Writes `soaring_first_flight.png` (top-down paths + altitude-over-time).
 
+## quick menu
+```
+python3 scripts/menu.py
+```
+prints every CLI, the automatic hooks, and the
+escape hatches at a glance — the fastest way to see what you can run.
+
 ## tinker — this is the actual point
 Open `fly.py` and change the lines tagged `# <-- TRY`, then re-run:
 - **thermal `w_peak` / `radius`** — stronger / wider rising air.

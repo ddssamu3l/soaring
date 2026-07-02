@@ -1,86 +1,108 @@
 {
-  "note": "ROADMAP — do in order, no skipping. Foundations done (micrograd, makemore 1-2, basic sim public). Steps t1-t4 are the WHOLE CORE: zero papers, a complete loop, and a real predict-vs-react RESULT lands at the end of t4; t5-t9 are deepening. The keystone gate is t2's plot (free-running vs teacher-forced error, vs horizon): flat -> prediction holds -> can plan (a planner; a startup); cliff -> can only react (a monitor; a commodity). Cost: t1-t7 ~$0 on the Mac, whole project <$2k — money is runway, not gear. Full per-step detail is in each task's notes; strategy / landscape / paper reading-order live in CLAUDE.md.",
+  "note": "ROADMAP \u2014 do in order, no skipping. Foundations done (micrograd, makemore 1-2, basic sim public). Steps t1-t4 are the WHOLE CORE: zero papers, a complete loop, and a real predict-vs-react RESULT lands at the end of t4; t5-t9 are deepening. The keystone gate is t2's plot (free-running vs teacher-forced error, vs horizon): flat -> prediction holds -> can plan (a planner; a startup); cliff -> can only react (a monitor; a commodity). Cost: t1-t7 ~$0 on the Mac, whole project <$2k \u2014 money is runway, not gear. Full per-step detail is in each task's notes; strategy / landscape / paper reading-order live in CLAUDE.md.",
   "tasks": [
     {
       "id": "t1",
       "title": "Log a dataset from the sim",
-      "status": "pending",
+      "status": "active",
       "deps": [],
-      "files": ["data_gen.py"],
+      "files": [
+        "data_gen.py"
+      ],
       "commit": null,
-      "notes": "Many rollouts, randomized bank angles; save (state, action, next_state) tuples to a file. The sim becomes a DATA FACTORY — the training set for everything below. Do the read-step() / bank-angle tinker rep alongside (the judgment prerequisite). YOU ARE HERE."
+      "notes": "Many rollouts, randomized bank angles; save (state, action, next_state) tuples to a file. The sim becomes a DATA FACTORY \u2014 the training set for everything below. Do the read-step() / bank-angle tinker rep alongside (the judgment prerequisite). YOU ARE HERE."
     },
     {
       "id": "t2",
-      "title": "Rung 1 — predict the next state (MLP) + the keystone plot",
+      "title": "Rung 1 \u2014 predict the next state (MLP) + the keystone plot",
       "status": "pending",
-      "deps": ["t1"],
-      "files": ["train.py"],
+      "deps": [
+        "t1"
+      ],
+      "files": [
+        "train.py"
+      ],
       "commit": null,
-      "notes": "THE FIRST KEYSTONE. Train an MLP (state,action)->next_state, MSE. Then the money plot: roll free-running vs teacher-forced, error vs horizon — THIS PLOT IS THE GO/NO-GO GATE (flat = can plan, cliff = can only react). Fixed field, memoryless, vario-only. Zero papers (pure makemore PyTorch). Barely-a-JEPA, but the loop closes — first real milestone."
+      "notes": "THE FIRST KEYSTONE. Train an MLP (state,action)->next_state, MSE. Then the money plot: roll free-running vs teacher-forced, error vs horizon \u2014 THIS PLOT IS THE GO/NO-GO GATE (flat = can plan, cliff = can only react). Fixed field, memoryless, vario-only. Zero papers (pure makemore PyTorch). Barely-a-JEPA, but the loop closes \u2014 first real milestone."
     },
     {
       "id": "t3",
       "title": "Add a planner (CEM/MPC) + navigate to a goal",
       "status": "pending",
-      "deps": ["t2"],
-      "files": ["planner.py"],
+      "deps": [
+        "t2"
+      ],
+      "files": [
+        "planner.py"
+      ],
       "commit": null,
-      "notes": "Use rung-1's predictor to imagine action sequences, score them, pick the best. TASK = REACH A GOAL, not endurance (endurance is the reactive trap — greedy 'turn toward lift' wins it; navigation forces commitment). Field still fixed (baked into weights, no memory yet). Minimal decision-forcing world: two thermals + sink between + goal past the second. Now it tries to soar."
+      "notes": "Use rung-1's predictor to imagine action sequences, score them, pick the best. TASK = REACH A GOAL, not endurance (endurance is the reactive trap \u2014 greedy 'turn toward lift' wins it; navigation forces commitment). Field still fixed (baked into weights, no memory yet). Minimal decision-forcing world: two thermals + sink between + goal past the second. Now it tries to soar."
     },
     {
       "id": "t4",
-      "title": "Compare to a reactive baseline — THE EXPERIMENT",
+      "title": "Compare to a reactive baseline \u2014 THE EXPERIMENT",
       "status": "pending",
-      "deps": ["t3"],
+      "deps": [
+        "t3"
+      ],
       "files": [],
       "commit": null,
-      "notes": "Reactive 'turn toward lift' vs the planner, same task. Headline: DOES PREDICTING BEAT REACTING? — the organizing question, as a number. Visible even on a fixed field: the reactor parks in thermal A or glides blindly; the planner commits to the A->B->goal route. (When airspeed becomes a control — a v2 upgrade — add MacCready speed-to-fly as the analytical optimum to score both against.)"
+      "notes": "Reactive 'turn toward lift' vs the planner, same task. Headline: DOES PREDICTING BEAT REACTING? \u2014 the organizing question, as a number. Visible even on a fixed field: the reactor parks in thermal A or glides blindly; the planner commits to the A->B->goal route. (When airspeed becomes a control \u2014 a v2 upgrade \u2014 add MacCready speed-to-fly as the analytical optimum to score both against.)"
     },
     {
       "id": "t5",
       "title": "Randomize + evolve the world (POMDP)",
       "status": "pending",
-      "deps": ["t4"],
+      "deps": [
+        "t4"
+      ],
       "files": [],
       "commit": null,
-      "notes": "Randomize layouts + thermal drift/decay (thermals move and fade). The agent can't memorize one map — it must INFER the current field from the lift it's felt -> the encoder gets a SHORT MEMORY WINDOW (the POMDP fix). Re-run the keystone and watch it get harder — isolates difficulty-in-the-world from difficulty-in-the-glider. Drift/decay is predictable (JEPA's home turf); a thermal being born is priors-only — step 5 tests the predictable kind. BUILD THE SENSOR FIREWALL HERE."
+      "notes": "Randomize layouts + thermal drift/decay (thermals move and fade). The agent can't memorize one map \u2014 it must INFER the current field from the lift it's felt -> the encoder gets a SHORT MEMORY WINDOW (the POMDP fix). Re-run the keystone and watch it get harder \u2014 isolates difficulty-in-the-world from difficulty-in-the-glider. Drift/decay is predictable (JEPA's home turf); a thermal being born is priors-only \u2014 step 5 tests the predictable kind. BUILD THE SENSOR FIREWALL HERE."
     },
     {
       "id": "t6",
-      "title": "Rung 2 — the real JEPA (latent prediction)",
+      "title": "Rung 2 \u2014 the real JEPA (latent prediction)",
       "status": "pending",
-      "deps": ["t5"],
+      "deps": [
+        "t5"
+      ],
       "files": [],
       "commit": null,
-      "notes": "THE REAL JEPA. Swap predict-next-state for encode -> predict next LATENT, with EMA target encoder + stop-gradient + anti-collapse. Papers read just-in-time: BYOL -> I-JEPA -> V-JEPA 2 / 2-AC -> LeWM (full annotated list = CLAUDE.md Reading order). Re-run keystone + planner; compare latent-JEPA vs rung-1. HONEST HEADS-UP: on a low-dim state rung 2 may NOT dramatically beat rung 1 — its payoff is learning the mechanism on a safe problem + being the prerequisite for vision. Don't read a tie as failure."
+      "notes": "THE REAL JEPA. Swap predict-next-state for encode -> predict next LATENT, with EMA target encoder + stop-gradient + anti-collapse. Papers read just-in-time: BYOL -> I-JEPA -> V-JEPA 2 / 2-AC -> LeWM (full annotated list = CLAUDE.md Reading order). Re-run keystone + planner; compare latent-JEPA vs rung-1. HONEST HEADS-UP: on a low-dim state rung 2 may NOT dramatically beat rung 1 \u2014 its payoff is learning the mechanism on a safe problem + being the prerequisite for vision. Don't read a tie as failure."
     },
     {
       "id": "t7",
       "title": "Dynamic soaring (shear layer)",
       "status": "pending",
-      "deps": ["t6"],
+      "deps": [
+        "t6"
+      ],
       "files": [],
       "commit": null,
       "notes": "Same engine, swap the thermal field for a SHEAR LAYER. The albatross energy-extraction loop is a committed trajectory you can't react into -> the hard test of plan-through. Thermal centering was the gentle test; here prediction's advantage should have real teeth."
     },
     {
       "id": "t8",
-      "title": "(Optional) Vision branch — add the camera",
+      "title": "(Optional) Vision branch \u2014 add the camera",
       "status": "pending",
-      "deps": ["t7"],
+      "deps": [
+        "t7"
+      ],
       "files": [],
       "commit": null,
-      "notes": "Brings a renderer (clouds/terrain) + a vision encoder (ViT/CNN) + V-JEPA-2-load onto the path. Answers: does SEEING the clouds beat inferring from the trail? — measured against the vario-only baseline. Gated behind everything above (it re-scopes the syllabus, so NOT next)."
+      "notes": "Brings a renderer (clouds/terrain) + a vision encoder (ViT/CNN) + V-JEPA-2-load onto the path. Answers: does SEEING the clouds beat inferring from the trail? \u2014 measured against the vario-only baseline. Gated behind everything above (it re-scopes the syllabus, so NOT next)."
     },
     {
       "id": "t9",
-      "title": "(Optional) Real hardware — RC glider/car, inference only",
+      "title": "(Optional) Real hardware \u2014 RC glider/car, inference only",
       "status": "pending",
-      "deps": ["t8"],
+      "deps": [
+        "t8"
+      ],
       "files": [],
       "commit": null,
-      "notes": "RC glider + flight controller + vario/IMU/GPS, INFERENCE ONLY (training stays on the Mac). A second, filmable, real-physics datapoint. Not needed for the result. The hobby-scan flagged the RC CAR as the cheapest physical keystone if a glider is fiddly — same engine on wheels, also filmable."
+      "notes": "RC glider + flight controller + vario/IMU/GPS, INFERENCE ONLY (training stays on the Mac). A second, filmable, real-physics datapoint. Not needed for the result. The hobby-scan flagged the RC CAR as the cheapest physical keystone if a glider is fiddly \u2014 same engine on wheels, also filmable."
     }
   ]
 }
