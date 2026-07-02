@@ -209,6 +209,42 @@ def test_history_records_raw_commands_and_the_panel() -> None:
     assert set(panel0.keys()) == set(SENSOR_NAMES)
 
 
+# --- the bird cue: wingtip lift asymmetry -----------------------------------
+def test_lift_asym_points_toward_the_thermal() -> None:
+    # south of the core flying east: the LEFT wingtip (north side) sits in
+    # stronger lift -> positive cue -> "turn left" is toward the thermal.
+    # Mirrored start -> mirrored cue. THE bird rule, as a sign convention.
+    air = ThermalMap(thermals=[Thermal(x0=0.0, y0=0.0, w_peak=4.0, radius=60.0)])
+    south = Simulation(
+        Glider(), air, GliderState(x=0.0, y=-50.0, z=500.0, heading=0.0, airspeed=20.0, bank=0.0)
+    )
+    north = Simulation(
+        Glider(), air, GliderState(x=0.0, y=50.0, z=500.0, heading=0.0, airspeed=20.0, bank=0.0)
+    )
+    assert south.sense()["lift_asym"] > 0.1  # thermal to the left
+    assert north.sense()["lift_asym"] < -0.1  # thermal to the right
+    assert south.sense()["lift_asym"] == pytest.approx(-north.sense()["lift_asym"])
+
+
+def test_lift_asym_is_zero_when_lift_is_symmetric() -> None:
+    # dead centered and heading through the core: both tips feel the same air.
+    sim = _sim(x=0.0, airspeed=20.0)  # at the core, heading east: tips at +/-y
+    assert sim.sense()["lift_asym"] == pytest.approx(0.0, abs=1e-12)
+
+
+def test_banking_shrinks_the_lift_asym_baseline() -> None:
+    # the span's horizontal footprint scales with cos(bank): a banked glider
+    # samples a narrower slice of air; knife-edge would feel no cue at all.
+    air = ThermalMap(thermals=[Thermal(x0=0.0, y0=0.0, w_peak=4.0, radius=60.0)])
+    level = Simulation(
+        Glider(), air, GliderState(x=0.0, y=-50.0, z=500.0, heading=0.0, airspeed=20.0, bank=0.0)
+    )
+    banked = Simulation(
+        Glider(), air, GliderState(x=0.0, y=-50.0, z=500.0, heading=0.0, airspeed=20.0, bank=1.0)
+    )
+    assert 0.0 < banked.sense()["lift_asym"] < level.sense()["lift_asym"]
+
+
 # --- the headline regression -------------------------------------------------
 def test_on_core_climbs_and_dead_air_sinks() -> None:
     # circling the core at thermalling speed gains altitude; the same commands
