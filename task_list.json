@@ -234,7 +234,7 @@
     {
       "id": "t21",
       "title": "land.py reconcile: don't auto-commit a deleted task_list.json/progress.txt",
-      "status": "pending",
+      "status": "active",
       "deps": [],
       "files": [
         "cli/land.py"
