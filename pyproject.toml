@@ -25,7 +25,7 @@ select = ["E", "F", "W", "I", "B", "UP"]
 [tool.mypy]
 python_version = "3.12"
 strict = true
-files = ["fly.py", "glider_sim.py"]
+files = ["data_gen.py", "fly.py", "glider_sim.py"]
 
 # --- tests + coverage ----------------------------------------------------
 [tool.pytest.ini_options]

@@ -4,8 +4,9 @@ fly.py -- fly a dumb policy in the glider sim and SEE what happens.
 Run it:
     .venv/bin/python fly.py
 
-It flies two gliders that each just hold a constant bank angle (so they circle
-forever). The only difference is WHERE they circle:
+It flies two gliders that each just hold the same constant stick commands
+(bank -> a steady circle; pitch -> hold thermalling speed). The only
+difference is WHERE they circle:
     A) far from the thermal -> circles in dead air -> sinks
     B) on the thermal core  -> circles in rising air -> climbs
 
@@ -36,7 +37,8 @@ def fly_a_circle(
     glider: Glider,
     air: ThermalMap,
     start: GliderState,
-    bank_angle: float,
+    bank_cmd: float,
+    pitch_cmd: float,
     seconds: float = 120,
     dt: float = 0.1,
 ) -> tuple[
@@ -45,11 +47,12 @@ def fly_a_circle(
     npt.NDArray[np.float64],
     npt.NDArray[np.float64],
 ]:
-    """Hold a constant bank for `seconds` and record the whole trajectory.
+    """Hold the same stick commands for `seconds`; record the trajectory.
 
     Spins up one Simulation and calls step() in a loop -- the simplest possible
-    "policy" (do the same thing every tick). Returns four NumPy arrays: x, y, z
-    over time, plus the time stamps.
+    "policy" (ask for the same thing every tick; the airframe rolls in and
+    settles on its own). Returns four NumPy arrays: x, y, z over time, plus
+    the time stamps.
     """
     sim = Simulation(glider, air, start, dt=dt)
     xs: list[float] = []
@@ -57,7 +60,7 @@ def fly_a_circle(
     zs: list[float] = []
     ts: list[float] = []
     for i in range(int(seconds / dt)):
-        st = sim.step(bank_angle)
+        st = sim.step(bank_cmd, pitch_cmd)
         xs.append(st.x)
         ys.append(st.y)
         zs.append(st.z)
@@ -67,18 +70,19 @@ def fly_a_circle(
 
 def main() -> None:
     # ---- the aircraft + the air ----
-    glider = Glider(airspeed=15.0, base_sink=0.7)  # <-- TRY (different airframe)
+    glider = Glider()  # ASK-21-class trainer  # <-- TRY (mass=650 -> ballasted)
     thermal = Thermal(x0=0.0, y0=0.0, w_peak=4.0, radius=60.0)  # <-- TRY (strength / width)
     air = ThermalMap(thermals=[thermal])  # wind defaults to (0, 0)
 
     bank = np.radians(40.0)  # 40-deg bank -> steady circle  # <-- TRY (steeper = tighter)
+    speed = 19.0  # min-sink speed: classic thermalling  # <-- TRY (15 stalls! 30 = fast)
 
     # Two identical gliders, different starting spots:
-    far = GliderState(x=-100.0, y=0.0, z=500.0, heading=0.0)  # <-- TRY (move it around)
-    near = GliderState(x=0.0, y=0.0, z=500.0, heading=0.0)  # circles on/around the core
+    far = GliderState(x=-100.0, y=0.0, z=500.0, heading=0.0, airspeed=19.0, bank=0.0)
+    near = GliderState(x=0.0, y=0.0, z=500.0, heading=0.0, airspeed=19.0, bank=0.0)
 
-    xa, ya, za, ta = fly_a_circle(glider, air, far, bank)
-    xb, yb, zb, tb = fly_a_circle(glider, air, near, bank)
+    xa, ya, za, ta = fly_a_circle(glider, air, far, bank, speed)
+    xb, yb, zb, tb = fly_a_circle(glider, air, near, bank, speed)
 
     # ---- draw it ----
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(13, 5.5))
