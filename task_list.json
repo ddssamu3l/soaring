@@ -186,6 +186,17 @@
       ],
       "commit": null,
       "notes": "sense() gains lift_asym = updraft(left wingtip) - updraft(right wingtip): the instantaneous LATERAL lift gradient \u2014 the torque cue birds center thermals with (validated: Reddy et al. PNAS 2016 + Nature 2018 \u2014 torque cue essential, vario-only much weaker). Glider gains wingspan (~17 m, ASK-21); wingtip horizontal separation scales with cos(bank) (knife-edge = no lateral sampling). Firewall-legal: field sampled at aircraft-attached points \u2014 felt, never told. Point-mass dynamics UNCHANGED (cue is sensed, not a simulated torque). SENSOR_NAMES grows to 9 \u2014 data_gen packs off SENSOR_NAMES so the factory adapts automatically; regenerate data/dataset.npz after landing. Sign: positive = left wing in stronger lift = turn left. Why before t2: first dataset the MLP sees should carry the bird sensor; also gives t4's reactive baseline the honest bird rule (turn toward the lifting wing) so predict-vs-react is fair. NOTE: t13 viewport notes say sensors (N,8) \u2014 stale; format is self-describing, read sensor_names from the file."
+    },
+    {
+      "id": "t17",
+      "title": "task.py notes command \u2014 edit a task's notes after creation",
+      "status": "pending",
+      "deps": [],
+      "files": [
+        "cli/task.py"
+      ],
+      "commit": null,
+      "notes": "add/block/done can't fix a typo or add context to an existing task's notes without ALLOW_STATE_EDIT. Add 'task.py notes <id> (--set TEXT | --append TEXT)' following start/done/block's local-save pattern (no main-commit needed, land.py reconciles)."
     }
   ]
 }
