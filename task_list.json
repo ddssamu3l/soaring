@@ -256,7 +256,7 @@
     {
       "id": "t23",
       "title": "guard_state.py blocks hand-edits to tracked files in the primary checkout",
-      "status": "pending",
+      "status": "active",
       "deps": [],
       "files": [
         "scripts/guard_state.py"
