@@ -167,7 +167,7 @@ def generate_dataset(
 
     Saved/returned keys:
       true_states, true_next_states  (N, 6) -- answer key: EVALUATION ONLY
-      sensors                        (N, 8) -- the panel: model food
+      sensors                        (N, 9) -- the panel: model food
       actions                        (N, 2) -- the commands: model food
       episode                        (N,)   -- rollout id (split by this!)
       state_names, action_names, sensor_names -- channel orders, in-file

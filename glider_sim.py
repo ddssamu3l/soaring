@@ -67,7 +67,7 @@ G = 9.81  # gravity (m/s^2) -- works through the turn, the exchange, the polar
 # live HERE, next to the physics that defines them.
 STATE_NAMES = ("x", "y", "z", "heading", "airspeed", "bank")
 ACTION_NAMES = ("bank_cmd", "pitch_cmd")
-SENSOR_NAMES = ("x", "y", "z", "heading", "airspeed", "bank", "vario", "vario_te")
+SENSOR_NAMES = ("x", "y", "z", "heading", "airspeed", "bank", "vario", "vario_te", "lift_asym")
 
 
 # ---------------------------------------------------------------------------
@@ -150,6 +150,7 @@ class Glider:
     accel: float = 2.0  # max airspeed change rate from pitch (m/s^2)
     stall_sink: float = 3.0  # EXTRA sink while stalled (m/s) -- the wing giving up
     max_bank: float = np.radians(60.0)  # command clamp; n=2 there, sink already ~2.8x
+    wingspan: float = 17.0  # tip-to-tip (m) -- the lateral baseline of the lift-asym cue
 
     def loading_scale(self) -> float:
         """k = sqrt(mass / mass_ref): the wing-loading shift. 1.0 at reference."""
@@ -242,10 +243,27 @@ class Simulation:
                       height exchange, leaving only (air - polar sink). This is
                       what real pilots center thermals with, and it is exactly
                       the ENERGY RATE instrument: vario_te * g == d(E/m)/dt.
+          lift_asym -- THE BIRD CUE: lift at the left wingtip minus lift at the
+                      right wingtip. Positive = left wing in stronger lift =
+                      the thermal is to the left. This is the rolling-moment
+                      cue birds center thermals with (a pilot feels it as "a
+                      wing lifts"); the torque cue Reddy et al. (PNAS 2016 /
+                      Nature 2018) found essential for learned soaring. It is
+                      an instantaneous LATERAL lift gradient -- something the
+                      vario trail can never give on a straight path. Felt at
+                      aircraft-attached points, so it is firewall-legal; the
+                      point-mass dynamics are unchanged (sensed, not a torque).
         This method is the ONLY window a model gets (plus its own actions and
         Glider params). The thermal's true parameters are not here -- ever.
         """
         s = self.state
+        # wingtip positions: heading is (cos, sin), so "left" is 90 deg CCW =
+        # (-sin, cos). Banking tilts the span out of the horizontal plane,
+        # shrinking its horizontal footprint by cos(bank) (knife-edge -> zero
+        # lateral baseline -> no cue).
+        half = 0.5 * self.glider.wingspan * float(np.cos(s.bank))
+        left = (s.x - half * np.sin(s.heading), s.y + half * np.cos(s.heading))
+        right = (s.x + half * np.sin(s.heading), s.y - half * np.cos(s.heading))
         return {
             "x": s.x,
             "y": s.y,
@@ -255,6 +273,7 @@ class Simulation:
             "bank": s.bank,
             "vario": self._vario,
             "vario_te": self._vario_te,
+            "lift_asym": float(self.air.updraft(*left)) - float(self.air.updraft(*right)),
         }
 
     def step(self, bank_cmd: float, pitch_cmd: float) -> GliderState:

@@ -134,6 +134,16 @@ def test_random_starts_are_airworthy() -> None:
         assert s.bank == 0.0
 
 
+def test_dataset_carries_a_live_wingtip_cue() -> None:
+    # the bird cue must actually vary in real rollouts (a dead column would
+    # mean the factory or the sensor silently broke) and stay bounded by the
+    # field itself (|left - right| can never exceed the peak updraft).
+    d = generate_dataset(**SMALL, out_path=None)
+    cue = d["sensors"][:, list(SENSOR_NAMES).index("lift_asym")]
+    assert np.any(np.abs(cue) > 0.01)  # alive: rollouts felt the gradient
+    assert np.all(np.abs(cue) < 4.0)  # bounded by w_peak
+
+
 # --- the FIREWALL guard: no thermal truth in the artifact --------------------
 def test_saved_file_contains_no_thermal_truth(tmp_path: Path) -> None:
     out = tmp_path / "d.npz"
