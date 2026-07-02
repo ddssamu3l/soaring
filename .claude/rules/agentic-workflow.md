@@ -22,15 +22,18 @@ new work is a direction call (theirs); resuming interrupted work is not.
 **The task loop (do exactly this):**
 ```bash
 python3 cli/task.py next                     # what's up
-python3 cli/task.py start t1                  # claim it (refuses if another active, or deps unmet)
-git worktree add ../soaring-t1 -b feature/t1-dataset main   # dedicated checkout; branch NAME carries the task id
-cd ../soaring-t1
+python3 cli/task.py begin t1                  # claim + create ../soaring-t1 on feature/t1-<slug> (prints the `cd`)
+cd ../soaring-t1                              # a subprocess can't cd the parent shell, so this step stays manual
 python3 cli/log.py "t1 started — plan: ..."
 #   ... write the code AND its test; git commit  (pre-commit hook runs check_all) ...
 cd -                                          # back to the primary checkout, on main
-python3 cli/land.py feature/t1-dataset        # serialize + gate + review + merge + cleanup; marks t1 done
+python3 cli/land.py feature/t1-<slug>         # serialize + gate + review + merge + cleanup; marks t1 done
 python3 cli/log.py "t1 done — <outcome / decision>"
 ```
+(`begin` derives the slug from the task's title — if you need the exact branch name
+again later, `git branch --list 'feature/t1-*'` finds it. For the rare off-convention
+case, `task.py start t1` + a hand-typed `git worktree add` still works exactly as
+before.)
 
 **Commit freely; ask before publishing.** Feature-branch commits are pre-authorized —
 local, reversible, they never touch main — so commit as you work (that's what trips the
@@ -41,7 +44,8 @@ is the user's call.
 
 **When to use each command** (exact signatures are in the generated block below):
 - `task.py next` / `list` — next pickable / full board (start here).
-- `task.py start tN` — claim a task (enforces single-writer + deps).
+- `task.py begin tN` — claim a task AND create its worktree in one step (prints the `cd`).
+- `task.py start tN` — claim only, no worktree (off-convention cases; `begin` calls this).
 - `task.py add` — append a pending task when new work surfaces.
 - `task.py block tN` — mark blocked when stuck.
 - `task.py notes tN` — fix/add notes without touching status (`--set` replaces, `--append` pipes on).
@@ -58,8 +62,9 @@ is the user's call.
 off-convention branches. Tied to the branch name.
 
 **Parallelism (worktree-per-task is the standing default).** Every task, whether or not
-another task happens to be active, gets its **own** checkout: `git worktree add
-../soaring-<taskid> -b feature/<taskid>-<slug> main`. This is what makes two Claude sessions
+another task happens to be active, gets its **own** checkout (`task.py begin tN` does
+this for you: `git worktree add ../soaring-<taskid> -b feature/<taskid>-<slug> main`).
+This is what makes two Claude sessions
 safe to run at the same time without a special "are we parallel?" judgment call — a task's
 worktree can never collide with any other session's WIP, staged index, or branch switches.
 `task_list.json`'s single-writer rule (one `active` task) is still per-checkout, not a
@@ -131,11 +136,13 @@ usage: rehydrate.py [-h] [--hook]
 
 usage: review.py [-h] [--base BASE] [--staged]
 
-usage: task.py [-h] {add,start,done,block,notes,list,next} ...
+usage: task.py [-h] {add,start,begin,done,block,notes,list,next} ...
 
 usage: task.py add [-h] --title TITLE [--deps DEPS] [--files FILES] [--notes NOTES]
 
 usage: task.py start [-h] id
+
+usage: task.py begin [-h] id
 
 usage: task.py done [-h] --commit COMMIT id
 
