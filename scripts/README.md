@@ -87,7 +87,11 @@ needs a human).
 
 Merges a feature branch into main behind a lock: re-runs `check_all` on the merged
 result, re-checks coupling/exempt on the merge delta, runs the AI review, and
-**rolls main back on any failure**.
+**rolls main back on any failure — including an unexpected crash**, not just a red
+gate (a merge that lands ungated because the tool crashed is worse than a loud
+failure). It resolves its own interpreter (and `.venv`) from the SHARED repo root, not
+its own worktree, since a task's dedicated worktree (the standing default) has no
+`.venv` of its own.
 
 **`land.py` is the ONLY door to main — enforced, not asked.** A raw `git merge` into
 main would bypass the judge *and* `check_all` (the pre-commit hook doesn't fire on

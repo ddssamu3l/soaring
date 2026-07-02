@@ -64,7 +64,10 @@ def _common_git_dir() -> Path:
 
 
 LOCK = _common_git_dir() / "queue.lock"
-PY = REPO / ".venv" / "bin" / "python"
+# .venv is gitignored and lives ONLY in the primary checkout — a task's dedicated
+# worktree (the standing default) has none, so resolve the interpreter from the
+# SHARED repo root, not REPO (which is worktree-local). Same fix as the pre-commit hook.
+PY = _common_git_dir().parent / ".venv" / "bin" / "python"
 
 
 def _task_from_branch(branch: str) -> str | None:
@@ -121,37 +124,44 @@ def land(branch: str, task: str | None = None) -> int:
         git(["reset", "--hard", before], check=False)
         return fail(f"{reason}\nmain rolled back to {before[:8]}. Fix on `{branch}`, then re-land.")
 
-    # 4. deterministic gate on the merged result ---------------------------
-    print("\n── check_all on merged main ──")
-    if subprocess.run([str(PY), "scripts/check_all.py"], cwd=REPO).returncode != 0:
-        return rollback("check_all FAILED on the merged result.")
+    # 4-5. gate + review the merged result. Wrapped: an UNEXPECTED exception here (not
+    #      just a red gate) must still roll main back -- a merge sitting on main that
+    #      never got gated is worse than a landing that fails loudly. Once main moves,
+    #      "fail safe" means "fail back to before", not "crash and leave it merged".
+    try:
+        # 4. deterministic gate on the merged result -------------------------
+        print("\n── check_all on merged main ──")
+        if subprocess.run([str(PY), "scripts/check_all.py"], cwd=REPO).returncode != 0:
+            return rollback("check_all FAILED on the merged result.")
 
-    # 4b. re-enforce the commit-time policy on the MERGE DELTA. check_all's
-    #     coupling/exempt gates key off the staged set, which is empty here — so a
-    #     worktree commit that bypassed the hook (--no-verify) would slip through.
-    #     Re-check against `before...HEAD` to close that hole.
-    delta = {
-        ln.strip()
-        for ln in git(["diff", f"{before}...HEAD", "--name-only"]).stdout.splitlines()
-        if ln.strip()
-    }
-    coup = check_all.coupling_violations(delta)
-    if coup and os.environ.get("ALLOW_NO_TEST_UPDATE") != "1":
-        return rollback(
-            "test-coupling FAILED on the merge (edited code, untouched tests):\n  "
-            + "\n  ".join(coup)
-        )
-    added_ex = check_all.exemptions_added(delta, before)
-    if added_ex and os.environ.get("ALLOW_EXEMPT") != "1":
-        return rollback(
-            "merge adds test exemptions without sign-off (re-land with ALLOW_EXEMPT=1):\n  "
-            + "\n  ".join(sorted(added_ex))
-        )
+        # 4b. re-enforce the commit-time policy on the MERGE DELTA. check_all's
+        #     coupling/exempt gates key off the staged set, which is empty here — so a
+        #     worktree commit that bypassed the hook (--no-verify) would slip through.
+        #     Re-check against `before...HEAD` to close that hole.
+        delta = {
+            ln.strip()
+            for ln in git(["diff", f"{before}...HEAD", "--name-only"]).stdout.splitlines()
+            if ln.strip()
+        }
+        coup = check_all.coupling_violations(delta)
+        if coup and os.environ.get("ALLOW_NO_TEST_UPDATE") != "1":
+            return rollback(
+                "test-coupling FAILED on the merge (edited code, untouched tests):\n  "
+                + "\n  ".join(coup)
+            )
+        added_ex = check_all.exemptions_added(delta, before)
+        if added_ex and os.environ.get("ALLOW_EXEMPT") != "1":
+            return rollback(
+                "merge adds test exemptions without sign-off (re-land with ALLOW_EXEMPT=1):\n  "
+                + "\n  ".join(sorted(added_ex))
+            )
 
-    # 5. AI review of exactly what this landing adds -----------------------
-    print("\n── AI review ──")
-    if subprocess.run([str(PY), "cli/review.py", "--base", before], cwd=REPO).returncode != 0:
-        return rollback("review BLOCKED the merge.")
+        # 5. AI review of exactly what this landing adds ---------------------
+        print("\n── AI review ──")
+        if subprocess.run([str(PY), "cli/review.py", "--base", before], cwd=REPO).returncode != 0:
+            return rollback("review BLOCKED the merge.")
+    except Exception as exc:  # noqa: BLE001 -- deliberately broad: see comment above
+        return rollback(f"land crashed mid-gate ({exc!r}).")
 
     # 6. success -----------------------------------------------------------
     if git(["remote"], check=False).stdout.strip():
