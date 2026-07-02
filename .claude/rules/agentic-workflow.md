@@ -44,6 +44,7 @@ is the user's call.
 - `task.py start tN` — claim a task (enforces single-writer + deps).
 - `task.py add` — append a pending task when new work surfaces.
 - `task.py block tN` — mark blocked when stuck.
+- `task.py notes tN` — fix/add notes without touching status (`--set` replaces, `--append` pipes on).
 - `task.py done tN` — rarely by hand; `land.py` does it on a green merge.
 - `log.py "msg"` — stamped note at every start / finish / decision.
 - `rehydrate.py` — print the board to catch up mid-session.
