@@ -154,13 +154,13 @@
     {
       "id": "t14",
       "title": "task.py add commits id allocation to main under land.py's lock",
-      "status": "active",
+      "status": "done",
       "deps": [],
       "files": [
         "cli/task.py",
         "cli/land.py"
       ],
-      "commit": null,
+      "commit": "3d57ce1b5937f6258205552855006204da509216",
       "notes": "task.py add's _next_id() reads whatever task_list.json happens to be in the calling worktree; under worktree-per-task, two sessions adding around the same time independently compute the same next id (hit for real: two sessions both got t11). Fix: task.py add resolves task_list.json from main's actual tip (fetch/read main ref, not the local worktree copy), acquires the SAME queue.lock land.py uses so two adds can never race between read-next-id and claim-it, and commits the new entry directly onto local main (self-authorized like land.py's ALLOW_MAIN_COMMIT) -- but does NOT push, so publishing stays land.py's job on the user's greenlight. Then copies the updated file back into the calling worktree so the id is visible immediately."
     }
   ]
