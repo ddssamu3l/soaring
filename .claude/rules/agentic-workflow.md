@@ -130,7 +130,7 @@ usage: rehydrate.py [-h] [--hook]
 
 usage: review.py [-h] [--base BASE] [--staged]
 
-usage: task.py [-h] {add,start,done,block,list,next} ...
+usage: task.py [-h] {add,start,done,block,notes,list,next} ...
 
 usage: task.py add [-h] --title TITLE [--deps DEPS] [--files FILES] [--notes NOTES]
 
@@ -139,6 +139,8 @@ usage: task.py start [-h] id
 usage: task.py done [-h] --commit COMMIT id
 
 usage: task.py block [-h] --reason REASON id
+
+usage: task.py notes [-h] (--set SET | --append APPEND) id
 
 usage: task.py list [-h] [-v]
 

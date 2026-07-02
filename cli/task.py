@@ -24,6 +24,7 @@ Commands:
     task.py start <id>              # -> active   (refuses if another is active)
     task.py done  <id> --commit SHA # -> done     (SHA must exist in git)
     task.py block <id> --reason R   # -> blocked
+    task.py notes <id> (--set T | --append T)  # edit notes without touching status
     task.py list                    # status board
     task.py next                    # the next pickable task
 """
@@ -262,6 +263,17 @@ def cmd_done(a: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_notes(a: argparse.Namespace) -> int:
+    data = _load()
+    t = _find(data, a.id)
+    if not t:
+        return _err(f"{a.id} not found")
+    t["notes"] = a.set if a.set is not None else (t["notes"] + f" | {a.append}").strip(" |")
+    _save(data)
+    print(f"notes {a.id}: {t['notes']}")
+    return 0
+
+
 def cmd_block(a: argparse.Namespace) -> int:
     data = _load()
     t = _find(data, a.id)
@@ -415,6 +427,13 @@ def main() -> int:
     p_block.add_argument("id")
     p_block.add_argument("--reason", required=True)
     p_block.set_defaults(fn=cmd_block)
+
+    p_notes = sub.add_parser("notes")
+    p_notes.add_argument("id")
+    g_notes = p_notes.add_mutually_exclusive_group(required=True)
+    g_notes.add_argument("--set", help="replace the notes outright")
+    g_notes.add_argument("--append", help="append, pipe-separated (same style as block's reason)")
+    p_notes.set_defaults(fn=cmd_notes)
 
     p_list = sub.add_parser("list")
     p_list.add_argument(

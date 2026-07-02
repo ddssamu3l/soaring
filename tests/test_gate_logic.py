@@ -199,3 +199,73 @@ def test_task_list_hides_done_by_default(tmp_path: Path) -> None:
     assert "t2" in plain.stdout
     assert "t1" in full.stdout, "--full must still show done tasks"
     assert "t2" in full.stdout
+
+
+# --- task.py notes -- edit a task's notes without touching status (2026-07-02) ---
+# Functional and safe for the same reason as `list` above: notes editing only reads
+# and writes task_list.json, no git plumbing involved.
+def _write_state(tmp_path: Path) -> None:
+    cli_dir = tmp_path / "cli"
+    cli_dir.mkdir()
+    shutil.copy(REPO / "cli" / "task.py", cli_dir / "task.py")
+    state = {
+        "tasks": [
+            {
+                "id": "t1",
+                "title": "some task",
+                "status": "pending",
+                "deps": [],
+                "files": [],
+                "commit": None,
+                "notes": "original note",
+            },
+        ]
+    }
+    (tmp_path / "task_list.json").write_text(json.dumps(state))
+
+
+def test_task_notes_set_replaces_outright(tmp_path: Path) -> None:
+    _write_state(tmp_path)
+    subprocess.run(
+        ["python3", "cli/task.py", "notes", "t1", "--set", "replaced"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+    data = json.loads((tmp_path / "task_list.json").read_text())
+    assert data["tasks"][0]["notes"] == "replaced"
+
+
+def test_task_notes_append_preserves_existing(tmp_path: Path) -> None:
+    _write_state(tmp_path)
+    subprocess.run(
+        ["python3", "cli/task.py", "notes", "t1", "--append", "extra context"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+    data = json.loads((tmp_path / "task_list.json").read_text())
+    assert data["tasks"][0]["notes"] == "original note | extra context"
+
+
+def test_task_notes_does_not_touch_status(tmp_path: Path) -> None:
+    _write_state(tmp_path)
+    subprocess.run(
+        ["python3", "cli/task.py", "notes", "t1", "--set", "x"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+    data = json.loads((tmp_path / "task_list.json").read_text())
+    assert data["tasks"][0]["status"] == "pending"
+
+
+def test_task_notes_missing_id_errors(tmp_path: Path) -> None:
+    _write_state(tmp_path)
+    r = subprocess.run(
+        ["python3", "cli/task.py", "notes", "t99", "--set", "x"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+    assert r.returncode != 0
