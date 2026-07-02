@@ -274,6 +274,19 @@
       ],
       "commit": "c0328aa4d22d4748d3fc814d45b93c210b855117",
       "notes": "AI review on t23 flagged: docstring/block message/docs describe the primary-checkout rule as guarding 'tracked, non-gitignored' files, but the code actually blocks ANY non-gitignored in-repo path -- including a brand-new untracked file via Write. Blocking new-file creation in primary is the right call (new work belongs on a worktree too), so keep the behavior; just reword every 'tracked' reference to 'not gitignored' so the docs match reality."
+    },
+    {
+      "id": "t25",
+      "title": "Sim stall fidelity: hysteresis + mush ramp (kill the tick-rate stall limit cycle)",
+      "status": "pending",
+      "deps": [
+        "t2"
+      ],
+      "files": [
+        "glider_sim.py"
+      ],
+      "commit": null,
+      "notes": "Found flying the t13 viewport: binary stall flag + dt=0.1 => ~5 Hz stall/recover limit cycle when commanded speed < banked stall speed (IAS pins at Vs(bank), vertical speed square-waves +/-3 m/s). Fix ladder: (1) hysteresis band \u2014 stall below Vs, recover only above Vs + ~1.5 m/s; (2) replace binary stall_sink with a continuous mush ramp near/below Vs (real gliders mush, and smooth dynamics are friendlier to the t2 MLP); (3) optional/later: pitch/AoA state so the phugoid emerges. Deps t2 on purpose: sim stays FROZEN until the keystone plot lands so results are comparable. Regenerate data/dataset.npz after; ledger entry 2026-07-02 has full context."
     }
   ]
 }
