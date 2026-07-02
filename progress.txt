@@ -22,3 +22,4 @@
 2026-07-02  [- 65d828f]  t17 started — plan: add task.py notes <id> --set/--append, mirroring block's local-save pattern; test via source assertions + a safe functional test since notes editing never touches git.
 2026-07-02  [- 6b95066]  t18 started — plan: one-line doc fix, AI-review follow-up from t17.
 2026-07-02  [- 961f123]  t19 started — plan: cmd_done accepts status in (active, pending), rejects blocked/done; this is the real fix for the recurring 'couldn't mark done' gap hit landing t14-t18.
+2026-07-02  [- 75a514d]  t20 started — plan: land.py reconciles a dirty task_list.json/progress.txt into a self-authorized commit instead of hard-refusing; anything else dirty still refuses.

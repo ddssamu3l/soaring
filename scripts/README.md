@@ -121,6 +121,15 @@ checkout) can wipe it silently. `task.py done` accepts `pending` too so that
 loss doesn't turn into a failed done-mark — `land.py`'s branch-name-derived
 task binding is the real proof this task landed, not that fragile flag.
 
+Before any of that, `land.py` also **reconciles a dirty `task_list.json`/
+`progress.txt`** rather than refusing outright: `task.py`'s `start`/`block`/
+`notes`/`done` and `log.py`'s appends all rewrite these two files on disk
+without committing, so the primary routinely carries a local diff in exactly
+these files between a `start` and its matching `land`. If the ONLY dirty
+files are those two, `land.py` folds them into a small self-authorized
+commit before proceeding — no riskier than the done-mark commit it already
+makes. Any OTHER dirty file still hard-refuses, unchanged.
+
 **`land.py` is the ONLY door to main — enforced, not asked.** A raw `git merge` into
 main would bypass the judge *and* `check_all` (the pre-commit hook doesn't fire on
 merges). A `pre-merge-commit` hook refuses any merge into main unless it came from
