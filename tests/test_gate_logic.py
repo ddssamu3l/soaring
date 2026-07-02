@@ -87,3 +87,13 @@ def test_land_rolls_back_on_an_unexpected_crash() -> None:
     # steps must be wrapped so ANY exception still triggers rollback().
     land = (REPO / "cli" / "land.py").read_text()
     assert "except Exception" in land, "post-merge steps must catch unexpected crashes too"
+
+
+# --- land.py must commit its own done-marking, not leave it dirty --------
+# (task.py's `done` command only rewrites task_list.json on disk, it never commits.
+# Left as-is, every land ends with a dirty working tree that someone has to remember
+# to commit — caught when t10's done-mark got stranded uncommitted inside a
+# concurrent session's WIP checkout instead of ever reaching a commit.)
+def test_land_commits_the_done_mark_itself() -> None:
+    land = (REPO / "cli" / "land.py").read_text()
+    assert "task: mark {task} done" in land, "land.py must commit task_list.json's done-mark"
