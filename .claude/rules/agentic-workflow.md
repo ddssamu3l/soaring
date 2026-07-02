@@ -47,6 +47,7 @@ is the user's call.
 - `check_all.py` — run the deterministic gate to pre-check before committing.
 - `review.py --base main` — standalone AI review (`land` runs it for you).
 - `land.py <branch>` — land a finished branch (gate + review + merge + rollback + mark-done).
+- `menu.py` — print the human cheat-sheet: every CLI, the automatic hooks, and the escape hatches.
 
 **Task↔branch binding = the BRANCH NAME.** `feature/<taskid>-<slug>` → `land.py` derives
 `tN` and marks it done on a green merge (no flag to remember). `--task tN` overrides for

@@ -8,6 +8,9 @@ The scaffold that lets agents work on this repo safely. Two layers:
 > Full human reference for the toolchain. The condensed, always-loaded version lives
 > in `.claude/rules/agentic-workflow.md`; this is the deeper dive.
 
+**Quick menu:** `python3 scripts/menu.py` prints every CLI, the automatic hooks, and the
+escape hatches at a glance — the fastest way to see what you can run.
+
 ---
 
 ## Durable session state (the anti-amnesia layer)
