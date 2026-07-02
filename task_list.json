@@ -219,6 +219,17 @@
       ],
       "commit": "6be838c9a739760dd9dffa45de988cd5ace7a2d8",
       "notes": "land.py's done-mark step (task.py done <id> --commit <sha>) requires status==active, but the local active flag lives ONLY in the primary checkout's uncommitted working tree -- it's wiped by any ordinary git checkout/dirty-cleanup on primary between start and land (hit for real landing t18: had to discard task_list.json to satisfy land's pre-merge dirty-check, which then made the post-merge done-mark fail with 'only an active task can be marked done', requiring a manual ALLOW_MAIN_COMMIT catch-up commit). Fix: cmd_done accepts status in (active, pending) -- land.py's branch-name-derived task binding is the real proof of legitimacy, not the ephemeral local flag. Keep rejecting blocked/done (idempotency, no silent unblock)."
+    },
+    {
+      "id": "t20",
+      "title": "land.py auto-reconciles a dirty task_list.json/progress.txt instead of refusing",
+      "status": "pending",
+      "deps": [],
+      "files": [
+        "cli/land.py"
+      ],
+      "commit": null,
+      "notes": "land.py's precondition check hard-refuses on ANY dirty file in the primary checkout, including task_list.json/progress.txt left locally dirty by task.py start / log.py (neither commits). This causes recurring 'main worktree is dirty' failures requiring manual git checkout/reset before every land -- easy for a future session to forget. Fix: if the ONLY dirty files are task_list.json and/or progress.txt, land.py self-authorizes (ALLOW_MAIN_COMMIT=1, same pattern as its done-mark) a small commit absorbing them before proceeding with the merge. Any OTHER dirty file still hard-refuses -- this only widens the exception for the two files task.py/log.py already own."
     }
   ]
 }
