@@ -75,7 +75,10 @@ SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
 AUTOMATIC: list[tuple[str, str]] = [
     ("pre-commit", "runs check_all on every commit; refuses a direct commit to main"),
     ("pre-merge-commit", "refuses a raw `git merge` into main — land.py is the only door"),
-    ("PreToolUse guard", "blocks direct Edit/Write of task_list.json (go through task.py)"),
+    (
+        "PreToolUse guard",
+        "blocks direct Edit/Write of task_list.json + progress.txt (use their CLIs)",
+    ),
     ("SessionStart", "runs rehydrate.py so a new/compacted session reopens knowing the board"),
 ]
 

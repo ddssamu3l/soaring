@@ -75,8 +75,9 @@ of them (single-writer is global — see the task-state note in scripts/README.m
   doc-coupling, docs-generated. Avoid needless failures: write the test file alongside the
   code, `ruff format` first, no `TODO/FIXME/XXX`, files < 600 lines, new non-exempt `.py` ⇒
   `tests/test_<name>.py`, and **regenerate docs after changing a CLI** (`gen_docs.py`).
-- **`task_list.json` is edit-locked** — a PreToolUse hook blocks direct Edit/Write.
-  Change it ONLY via `task.py` (enforces one-active-task, deps, real-commit-for-done).
+- **`task_list.json` and `progress.txt` are edit-locked** — a PreToolUse hook blocks direct
+  Edit/Write. Change them ONLY via their CLI: `task.py` (enforces one-active-task, deps,
+  real-commit-for-done) and `log.py` (append-only, auto-stamped). Break-glass: `ALLOW_STATE_EDIT=1`.
 - **`land.py`** serializes via a file lock, re-gates the *merged* result + the merge delta,
   runs the AI review, and **rolls main back on ANY failure**.
 - **No direct `git merge` into `main`** — a `pre-merge-commit` hook refuses it (main moves

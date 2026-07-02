@@ -46,7 +46,10 @@ Break-glass for a human to hand-edit anyway: `ALLOW_STATE_EDIT=1`.
 python3 scripts/log.py "t2 started — plan: 2-layer MLP, MSE, keystone plot is the deliverable"
 ```
 
-Auto-stamps date + active task + git sha. Append-only, low risk, no hard guard.
+Auto-stamps date + active task + git sha. Append-only. Like `task_list.json`, the file is
+edit-locked by the `guard_state.py` PreToolUse hook — direct Edit/Write is blocked, so
+`log.py` is the door (break-glass: `ALLOW_STATE_EDIT=1`). The hook only catches the *tool*,
+not this CLI's own write.
 
 ### `rehydrate.py` — resume from disk
 
