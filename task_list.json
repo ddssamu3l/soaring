@@ -252,6 +252,17 @@
       ],
       "commit": "688071179e252a455bcf2081383cd745a8d00083",
       "notes": "Right now claiming a task is 3 manual steps: task.py start tN, hand-derive a slug + git worktree add ../soaring-tN -b feature/tN-<slug> main, then cd. Add task.py begin tN: does start's claim, derives the branch slug from the task title automatically, creates the worktree, and prints the cd command to run next. True teleportation isn't possible (a subprocess can't cd the parent shell), so this collapses it to 'run one command, then cd' instead of 3 manual steps. task.py start stays available standalone for off-convention cases."
+    },
+    {
+      "id": "t23",
+      "title": "guard_state.py blocks hand-edits to tracked files in the primary checkout",
+      "status": "pending",
+      "deps": [],
+      "files": [
+        "scripts/guard_state.py"
+      ],
+      "commit": null,
+      "notes": "Direct Edit/Write to a tracked source/doc file in PRIMARY was only conventionally discouraged, not hook-enforced -- caught for real when I hand-edited agentic-workflow.md directly in primary for a t17 docs nit and had to self-catch + redo as t18. Extend guard_state.py: task_list.json/progress.txt keep their existing per-file guard (any checkout). NEW: any OTHER tracked, non-gitignored file is also blocked when the CURRENT checkout is the PRIMARY one (git rev-parse --git-dir == --git-common-dir), not a linked task worktree -- coding in a worktree is unaffected, that's the whole point. Gitignored files (CLAUDE.md, .venv, data/) stay unguarded. New break-glass: ALLOW_MAIN_EDIT=1, mirroring ALLOW_MAIN_COMMIT."
     }
   ]
 }
