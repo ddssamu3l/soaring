@@ -6,6 +6,7 @@ requires-python = ">=3.12"
 dependencies = [
     "numpy>=2.0",
     "matplotlib>=3.9",
+    "pygame>=2.6.1",
 ]
 
 [dependency-groups]
@@ -25,7 +26,11 @@ select = ["E", "F", "W", "I", "B", "UP"]
 [tool.mypy]
 python_version = "3.12"
 strict = true
-files = ["data_gen.py", "fly.py", "glider_sim.py"]
+files = ["data_gen.py", "fly.py", "glider_sim.py", "viewport"]
+# viewport/ is a namespace package (no __init__.py); anchor module names at
+# the repo root so viewport/colors.py is "viewport.colors", not "colors".
+explicit_package_bases = true
+
 
 # --- tests + coverage ----------------------------------------------------
 [tool.pytest.ini_options]
