@@ -130,12 +130,12 @@
     {
       "id": "t12",
       "title": "land.py must authorize its own done-mark commit (ALLOW_MAIN_COMMIT)",
-      "status": "active",
+      "status": "done",
       "deps": [],
       "files": [
         "cli/land.py"
       ],
-      "commit": null,
+      "commit": "9fb99a6cf0e1a48e0c94a1818fabf6172a590275",
       "notes": "t11's fix made land.py 'git commit' the done-mark on main, but the pre-commit hook refuses direct commits to main and land.py never set ALLOW_MAIN_COMMIT for itself -- so the very first real land under the t11 fix silently failed to commit (best-effort, so LANDED still printed), reproducing the exact bug t11 was fixing, one level deeper. Fix: land.py sets ALLOW_MAIN_COMMIT=1 process-wide alongside the existing LAND_ACTIVE=1, same self-authorization pattern already used for the merge hook."
     }
   ]
