@@ -24,8 +24,10 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
+import textwrap
 from pathlib import Path
 from typing import Any
 
@@ -149,17 +151,24 @@ _ST_GLYPH = {"done": "✓", "active": "▶", "blocked": "✗", "pending": "○"}
 _ST_CODE = {"done": "32", "active": "1;36", "blocked": "31", "pending": "2"}
 
 
-def cmd_list(_: argparse.Namespace) -> int:
+def cmd_list(a: argparse.Namespace) -> int:
     data = _load()
     tasks = data["tasks"]
     if not tasks:
         print("(no tasks)")
         return 0
 
+    full = getattr(a, "full", False)
     color = sys.stdout.isatty()  # tint for humans; stay plain in agent/piped output
 
     def paint(s: str, code: str) -> str:
         return f"\033[{code}m{s}\033[0m" if color else s
+
+    ind = " " * 8
+    wrapw = max(40, min(shutil.get_terminal_size((100, 24)).columns, 100)) - len(ind)
+
+    def wrap(text: str) -> str:
+        return textwrap.fill(text, width=wrapw, initial_indent=ind, subsequent_indent=ind)
 
     total = len(tasks)
     counts = {s: sum(1 for t in tasks if t["status"] == s) for s in _ST_CODE}
@@ -179,6 +188,12 @@ def cmd_list(_: argparse.Namespace) -> int:
     )
     print(f"\n{paint('soaring — task board', '1')}")
     print(f"  {bar}  {counts['done']}/{total}    {summary}\n")
+
+    if full and data.get("note"):
+        frame = textwrap.fill(
+            data["note"], width=wrapw + len(ind), initial_indent="  ", subsequent_indent="  "
+        )
+        print(paint(frame, "2"), end="\n\n")
 
     width = min(max(len(t["title"]) for t in tasks), 52)
     for t in tasks:
@@ -205,8 +220,19 @@ def cmd_list(_: argparse.Namespace) -> int:
         cell = paint(title, "2") if dim else (paint(title, "1;36") if st == "active" else title)
         print(f"  {gly} {tid}  {cell}  {note}")
 
+        if full:
+            meta = []
+            if t["deps"]:
+                meta.append("deps: " + ", ".join(t["deps"]))
+            meta.append("files: " + (", ".join(t["files"]) if t["files"] else "—"))
+            print(paint(ind + "   ·   ".join(meta), "2"))
+            if t["notes"]:
+                print(paint(wrap(t["notes"]), "2"))
+            print()
+
+    # compact view: surface just the active task's plan; --full already shows every note
     active = next((t for t in tasks if t["status"] == "active"), None)
-    if active and active["notes"]:
+    if not full and active and active["notes"]:
         plan = active["notes"]
         plan = (plan[:75] + "…") if len(plan) > 76 else plan
         print(f"\n  {paint('↳ ' + active['id'] + ' plan:', '1;36')} {paint(plan, '2')}")
@@ -257,7 +283,14 @@ def main() -> int:
     p_block.add_argument("--reason", required=True)
     p_block.set_defaults(fn=cmd_block)
 
-    sub.add_parser("list").set_defaults(fn=cmd_list)
+    p_list = sub.add_parser("list")
+    p_list.add_argument(
+        "-v",
+        "--full",
+        action="store_true",
+        help="expand each task with its notes, files, deps + the roadmap framing",
+    )
+    p_list.set_defaults(fn=cmd_list)
     sub.add_parser("next").set_defaults(fn=cmd_next)
 
     args = ap.parse_args()

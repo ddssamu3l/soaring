@@ -36,7 +36,7 @@ SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
             ("python3 scripts/task.py next", "show the next pickable task"),
             (
                 "python3 scripts/task.py list",
-                "status board — progress bar, deps, what's next, active plan",
+                "status board — progress bar, deps, next-up  (add --full for notes + framing)",
             ),
             ("python3 scripts/task.py start t1", "claim a task — single-writer; checks deps"),
             (

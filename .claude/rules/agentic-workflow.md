@@ -110,7 +110,7 @@ usage: task.py done [-h] --commit COMMIT id
 
 usage: task.py block [-h] --reason REASON id
 
-usage: task.py list [-h]
+usage: task.py list [-h] [-v]
 
 usage: task.py next [-h]
 
