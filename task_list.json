@@ -291,7 +291,7 @@
     {
       "id": "t26",
       "title": "gitattributes: merge=union for progress.txt",
-      "status": "pending",
+      "status": "active",
       "deps": [],
       "files": [
         ".gitattributes"
