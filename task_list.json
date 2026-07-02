@@ -291,12 +291,12 @@
     {
       "id": "t26",
       "title": "gitattributes: merge=union for progress.txt",
-      "status": "active",
+      "status": "done",
       "deps": [],
       "files": [
         ".gitattributes"
       ],
-      "commit": null,
+      "commit": "e813a73280a1bf5a65d787528fa3b3ea729d92c1",
       "notes": "t13's landing prep hit a real progress.txt merge conflict when merging main into the feature branch (main gained t17-t24 appends while t13 was in flight), resolved ad hoc by hand. No .gitattributes exists yet, so every future branch will hit the same tail-append conflict and get resolved inconsistently -- risky if anyone reaches for a whole-merge -X union instead (that would silently union-merge ANY conflicting file, mangling real code conflicts). Fix: commit .gitattributes with 'progress.txt merge=union' (git's builtin union merge driver, no custom script needed) so this conflict class auto-resolves safely and consistently on every merge, not just land.py's primary-checkout dirty-tree case (t20/t21, which is a different code path)."
     }
   ]
