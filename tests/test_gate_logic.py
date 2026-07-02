@@ -11,12 +11,18 @@ tests. These lock in the three fixes from the worktree/merge-queue audit:
 
 from __future__ import annotations
 
+import argparse
+import importlib.util
+import io
 import json
 import shutil
 import subprocess
+import sys
 from pathlib import Path
+from typing import Any
 
 import check_all
+import pytest
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -113,6 +119,32 @@ def test_land_authorizes_its_own_done_mark_commit() -> None:
     assert 'ALLOW_MAIN_COMMIT"] = "1"' in land, "land.py must self-authorize its main commit"
 
 
+# --- land.py reconciles a dirty task_list.json/progress.txt instead of refusing --
+# (task.py's start/block/notes/done and log.py's appends all rewrite these two files
+# on disk without committing -- that's land.py's job. Hard-refusing on ANY dirty file
+# forced a manual discard/reset before every land, easy to forget -- hit for real
+# landing t18/t19. These two files are the only ones this scaffold's own tools ever
+# leave dirty, so folding them into a commit here is no riskier than the existing
+# done-mark commit. Static assertions -- `_reconcile_dirty_state` shells real git
+# against the actual REPO constant, so it can't be exercised live in a test without
+# risking the exact corruption class documented for task.py's own git-touching tests.)
+def test_land_reconciles_dirty_task_state_before_landing() -> None:
+    land = (REPO / "cli" / "land.py").read_text()
+    assert 'RECONCILABLE = {"task_list.json", "progress.txt"}' in land
+    assert "_reconcile_dirty_state" in land, "land.py must reconcile, not just refuse"
+
+
+def test_land_still_refuses_other_dirty_files() -> None:
+    land = (REPO / "cli" / "land.py").read_text()
+    assert "dirty <= RECONCILABLE" in land, "only task_list.json/progress.txt may auto-reconcile"
+
+
+# --- ...but never auto-commits a DELETED state file (t20 review follow-up) -------
+def test_land_reconcile_refuses_a_deleted_state_file() -> None:
+    land = (REPO / "cli" / "land.py").read_text()
+    assert '"D" in ln[:2]' in land, "a deleted task_list.json/progress.txt must not auto-reconcile"
+
+
 # --- task.py add must allocate ids off main, not a stale local copy --------
 # (worktree-per-task means every worktree forks its own snapshot of task_list.json;
 # `_next_id()` used to read that local copy, so two worktrees adding a task around
@@ -199,3 +231,278 @@ def test_task_list_hides_done_by_default(tmp_path: Path) -> None:
     assert "t2" in plain.stdout
     assert "t1" in full.stdout, "--full must still show done tasks"
     assert "t2" in full.stdout
+
+
+# --- task.py notes -- edit a task's notes without touching status (2026-07-02) ---
+# Functional and safe for the same reason as `list` above: notes editing only reads
+# and writes task_list.json, no git plumbing involved.
+def _write_state(tmp_path: Path) -> None:
+    cli_dir = tmp_path / "cli"
+    cli_dir.mkdir()
+    shutil.copy(REPO / "cli" / "task.py", cli_dir / "task.py")
+    state = {
+        "tasks": [
+            {
+                "id": "t1",
+                "title": "some task",
+                "status": "pending",
+                "deps": [],
+                "files": [],
+                "commit": None,
+                "notes": "original note",
+            },
+        ]
+    }
+    (tmp_path / "task_list.json").write_text(json.dumps(state))
+
+
+def test_task_notes_set_replaces_outright(tmp_path: Path) -> None:
+    _write_state(tmp_path)
+    subprocess.run(
+        ["python3", "cli/task.py", "notes", "t1", "--set", "replaced"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+    data = json.loads((tmp_path / "task_list.json").read_text())
+    assert data["tasks"][0]["notes"] == "replaced"
+
+
+def test_task_notes_append_preserves_existing(tmp_path: Path) -> None:
+    _write_state(tmp_path)
+    subprocess.run(
+        ["python3", "cli/task.py", "notes", "t1", "--append", "extra context"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+    data = json.loads((tmp_path / "task_list.json").read_text())
+    assert data["tasks"][0]["notes"] == "original note | extra context"
+
+
+def test_task_notes_does_not_touch_status(tmp_path: Path) -> None:
+    _write_state(tmp_path)
+    subprocess.run(
+        ["python3", "cli/task.py", "notes", "t1", "--set", "x"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+    data = json.loads((tmp_path / "task_list.json").read_text())
+    assert data["tasks"][0]["status"] == "pending"
+
+
+def test_task_notes_missing_id_errors(tmp_path: Path) -> None:
+    _write_state(tmp_path)
+    r = subprocess.run(
+        ["python3", "cli/task.py", "notes", "t99", "--set", "x"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+    assert r.returncode != 0
+
+
+# --- task.py done accepts pending, not just active (2026-07-02) -----------------
+# `active` lives only in the primary checkout's uncommitted working tree, so it's
+# easy to lose between `start` and land.py's post-merge done-mark (hit for real
+# landing t18). `done` shells out to `git cat-file` to verify the commit exists --
+# a real subprocess git call in a test previously inherited GIT_DIR from the
+# pre-commit hook's own environment and corrupted the shared repo for real (hit
+# for real writing this test the first time: primary's core.bare flipped true,
+# a stray commit landed on this very branch). Fix: never shell out to git at
+# all here -- import task.py as a module, monkeypatch `_git_has`, and call
+# `cmd_done` in-process. Zero subprocesses, zero risk.
+def _load_task_module() -> Any:
+    spec = importlib.util.spec_from_file_location("task_cli_under_test", REPO / "cli" / "task.py")
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _done_ns(tid: str) -> argparse.Namespace:
+    return argparse.Namespace(id=tid, commit="deadbeef")
+
+
+def _state(status: str) -> dict[str, Any]:
+    return {
+        "tasks": [
+            {
+                "id": "t1",
+                "title": "some task",
+                "status": status,
+                "deps": [],
+                "files": [],
+                "commit": None,
+                "notes": "",
+            },
+        ]
+    }
+
+
+def test_task_done_accepts_pending(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    task_cli = _load_task_module()
+    monkeypatch.setattr(task_cli, "STATE", tmp_path / "task_list.json")
+    monkeypatch.setattr(task_cli, "_git_has", lambda sha: True)
+    task_cli.STATE.write_text(json.dumps(_state("pending")))
+    assert task_cli.cmd_done(_done_ns("t1")) == 0
+    assert json.loads(task_cli.STATE.read_text())["tasks"][0]["status"] == "done"
+
+
+def test_task_done_still_accepts_active(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    task_cli = _load_task_module()
+    monkeypatch.setattr(task_cli, "STATE", tmp_path / "task_list.json")
+    monkeypatch.setattr(task_cli, "_git_has", lambda sha: True)
+    task_cli.STATE.write_text(json.dumps(_state("active")))
+    assert task_cli.cmd_done(_done_ns("t1")) == 0
+
+
+def test_task_done_rejects_blocked(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    task_cli = _load_task_module()
+    monkeypatch.setattr(task_cli, "STATE", tmp_path / "task_list.json")
+    monkeypatch.setattr(task_cli, "_git_has", lambda sha: True)
+    task_cli.STATE.write_text(json.dumps(_state("blocked")))
+    assert task_cli.cmd_done(_done_ns("t1")) != 0
+
+
+def test_task_done_rejects_already_done(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    task_cli = _load_task_module()
+    monkeypatch.setattr(task_cli, "STATE", tmp_path / "task_list.json")
+    monkeypatch.setattr(task_cli, "_git_has", lambda sha: True)
+    task_cli.STATE.write_text(json.dumps(_state("done")))
+    assert task_cli.cmd_done(_done_ns("t1")) != 0
+
+
+# --- task.py begin -- start + derive a slug + git worktree add, one step (2026-07-02) --
+# `subprocess.run` is monkeypatched to a recorder rather than allowed to run for real:
+# `git worktree add` against the actual REPO would create a real worktree as a test
+# side effect -- not the corruption-class hazard from earlier (no GIT_DIR inheritance
+# risk, it's a real intended operation, not an isolated-tmp-dir one), but still not
+# something a test run should do to the real repo. Verifying the exact command is
+# built correctly is the same coverage without the side effect.
+def _begin_ns(tid: str) -> argparse.Namespace:
+    return argparse.Namespace(id=tid)
+
+
+def test_task_slug_derivation() -> None:
+    task_cli = _load_task_module()
+    assert task_cli._slug("Fix Some Thing!!") == "fix-some-thing"
+    assert task_cli._slug("  leading/trailing -- spaces  ") == "leading-trailing-spaces"
+    assert task_cli._slug("") == "task"
+    assert not task_cli._slug("x" * 100).endswith("-")
+
+
+def test_task_begin_starts_then_creates_worktree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    task_cli = _load_task_module()
+    monkeypatch.setattr(task_cli, "STATE", tmp_path / "task_list.json")
+    task_cli.STATE.write_text(json.dumps(_state("pending")))
+
+    calls = []
+
+    def fake_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(task_cli.subprocess, "run", fake_run)
+
+    assert task_cli.cmd_begin(_begin_ns("t1")) == 0
+    assert json.loads(task_cli.STATE.read_text())["tasks"][0]["status"] == "active"
+    assert len(calls) == 1
+    cmd = calls[0]
+    assert cmd[:3] == ["git", "worktree", "add"]
+    assert cmd[3] == "../soaring-t1"
+    assert cmd[4] == "-b"
+    assert cmd[5] == "feature/t1-some-task"
+    assert cmd[6] == "main"
+
+
+def test_task_begin_refuses_if_start_refuses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # "blocked" tasks CAN be resumed (start accepts pending or blocked) -- use
+    # "done" instead, the actual case start refuses.
+    task_cli = _load_task_module()
+    monkeypatch.setattr(task_cli, "STATE", tmp_path / "task_list.json")
+    task_cli.STATE.write_text(json.dumps(_state("done")))
+
+    calls: list[list[str]] = []
+    monkeypatch.setattr(task_cli.subprocess, "run", lambda cmd, **kw: calls.append(cmd))
+
+    assert task_cli.cmd_begin(_begin_ns("t1")) != 0
+    assert not calls, "must not touch git if start itself refused"
+
+
+# --- guard_state.py blocks hand-edits of tracked files in PRIMARY (2026-07-02) ---
+# `_is_primary_checkout`/`_is_gitignored` shell real git against the actual REPO --
+# monkeypatched here rather than exercised live, same reasoning as task.py's own
+# git-touching helpers: this only tests the decision logic, not git itself.
+def _load_guard_module() -> Any:
+    spec = importlib.util.spec_from_file_location(
+        "guard_state_under_test", REPO / "scripts" / "guard_state.py"
+    )
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _run_guard(
+    module: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    file_path: str,
+    *,
+    primary: bool,
+    ignored: bool,
+) -> int:
+    monkeypatch.setattr(module, "_is_primary_checkout", lambda: primary)
+    monkeypatch.setattr(module, "_is_gitignored", lambda p: ignored)
+    monkeypatch.setattr(
+        sys, "stdin", io.StringIO(json.dumps({"tool_input": {"file_path": file_path}}))
+    )
+    return int(module.main())
+
+
+def test_guard_blocks_tracked_edit_in_primary(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _load_guard_module()
+    target = str(module.REPO / "cli" / "task.py")
+    assert _run_guard(module, monkeypatch, target, primary=True, ignored=False) == 2
+
+
+def test_guard_allows_tracked_edit_in_a_task_worktree(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _load_guard_module()
+    target = str(module.REPO / "cli" / "task.py")
+    assert _run_guard(module, monkeypatch, target, primary=False, ignored=False) == 0
+
+
+def test_guard_allows_gitignored_file_in_primary(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _load_guard_module()
+    target = str(module.REPO / "CLAUDE.md")
+    assert _run_guard(module, monkeypatch, target, primary=True, ignored=True) == 0
+
+
+def test_guard_main_edit_break_glass(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _load_guard_module()
+    monkeypatch.setenv("ALLOW_MAIN_EDIT", "1")
+    target = str(module.REPO / "cli" / "task.py")
+    assert _run_guard(module, monkeypatch, target, primary=True, ignored=False) == 0
+
+
+def test_guard_state_files_guarded_in_any_checkout_including_worktrees(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_guard_module()
+    target = str(module.REPO / "task_list.json")
+    # state-file guard applies regardless of primary/worktree -- it's the OTHER rule
+    assert _run_guard(module, monkeypatch, target, primary=False, ignored=False) == 2
+
+
+def test_guard_state_edit_break_glass_unaffected_by_main_edit_flag(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_guard_module()
+    monkeypatch.setenv("ALLOW_STATE_EDIT", "1")
+    target = str(module.REPO / "progress.txt")
+    assert _run_guard(module, monkeypatch, target, primary=True, ignored=False) == 0

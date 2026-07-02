@@ -19,11 +19,24 @@ plumbing, no `git commit` -- doesn't touch this checkout's HEAD, doesn't need
 `ALLOW_MAIN_COMMIT`, doesn't push). Falls back to a local-only add if `main`
 can't be resolved (fresh/bootstrap repo) so `add` never hard-fails on that.
 
+`done` accepts an `active` OR `pending` task -- `active` lives only in the local
+checkout's uncommitted working tree, so it's easy to lose between `start` and
+`land.py`'s post-merge done-mark (hit for real landing t18). land.py's
+branch-name-derived task binding is the real proof a task landed, not that
+fragile flag. `blocked`/`done` still refuse (no silent unblock/double-mark).
+
+`begin` is `start` + a derived-from-the-title slug + `git worktree add`, one step
+instead of three -- a subprocess can't `cd` the calling shell, so it prints the
+`cd` to run next rather than actually landing you there. `start` alone still
+exists for the rare off-convention case (no worktree wanted yet).
+
 Commands:
     task.py add   --title T [--deps a,b] [--files "a.py;b.py"] [--notes N]
     task.py start <id>              # -> active   (refuses if another is active)
-    task.py done  <id> --commit SHA # -> done     (SHA must exist in git)
+    task.py begin <id>              # start + create ../soaring-<id> worktree, prints `cd`
+    task.py done  <id> --commit SHA # -> done     (from active OR pending; SHA must exist in git)
     task.py block <id> --reason R   # -> blocked
+    task.py notes <id> (--set T | --append T)  # edit notes without touching status
     task.py list                    # status board
     task.py next                    # the next pickable task
 """
@@ -34,6 +47,7 @@ import argparse
 import fcntl
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -246,19 +260,64 @@ def cmd_start(a: argparse.Namespace) -> int:
     return 0
 
 
+def _slug(title: str) -> str:
+    s = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
+    return (s[:40].rstrip("-")) or "task"
+
+
+def cmd_begin(a: argparse.Namespace) -> int:
+    """`start` + derive-a-slug + `git worktree add`, in one step -- a subprocess
+    can't `cd` the parent shell, so this can't teleport you into the worktree, but
+    it collapses the previous 3 hand-typed steps (start, hand-derive a slug, git
+    worktree add) down to "run this, then cd"."""
+    rc = cmd_start(a)
+    if rc != 0:
+        return rc
+    t = _find(_load(), a.id)
+    assert t is not None  # cmd_start just verified it exists and is now active
+    branch = f"feature/{a.id}-{_slug(t['title'])}"
+    worktree = f"../soaring-{a.id}"
+    wt = subprocess.run(["git", "worktree", "add", worktree, "-b", branch, "main"], cwd=REPO)
+    if wt.returncode != 0:
+        return _err(
+            f"claimed {a.id} but worktree creation failed -- create it by hand: "
+            f"git worktree add {worktree} -b {branch} main"
+        )
+    print(f"\nnext: cd {worktree}")
+    return 0
+
+
 def cmd_done(a: argparse.Namespace) -> int:
     data = _load()
     t = _find(data, a.id)
     if not t:
         return _err(f"{a.id} not found")
-    if t["status"] != "active":
-        return _err(f"{a.id} is {t['status']}, only an active task can be marked done")
+    # `active` is the common case, but under worktree-per-task it's an ephemeral
+    # local flag (never committed) -- ordinary git operations on the primary
+    # checkout (a stray `git checkout`, a dirty-tree reset before landing) can
+    # wipe it between `start` and `land.py`'s post-merge done-mark. Accepting
+    # `pending` too closes that gap: land.py's branch-name-derived task binding
+    # is the real proof this task legitimately landed, not the fragile flag.
+    # `blocked`/`done` still rejected -- no silent unblock, no double-mark.
+    if t["status"] not in ("active", "pending"):
+        return _err(f"{a.id} is {t['status']}, cannot be marked done")
     if not _git_has(a.commit):
         return _err(f"commit {a.commit!r} not in git — a real landed commit is required")
     t["status"] = "done"
     t["commit"] = a.commit
     _save(data)
     print(f"done {a.id} @ {a.commit[:8]}")
+    return 0
+
+
+def cmd_notes(a: argparse.Namespace) -> int:
+    data = _load()
+    t = _find(data, a.id)
+    if not t:
+        return _err(f"{a.id} not found")
+    t["notes"] = a.set if a.set is not None else (t["notes"] + f" | {a.append}").strip(" |")
+    _save(data)
+    print(f"notes {a.id}: {t['notes']}")
     return 0
 
 
@@ -406,6 +465,10 @@ def main() -> int:
     p_start.add_argument("id")
     p_start.set_defaults(fn=cmd_start)
 
+    p_begin = sub.add_parser("begin")
+    p_begin.add_argument("id")
+    p_begin.set_defaults(fn=cmd_begin)
+
     p_done = sub.add_parser("done")
     p_done.add_argument("id")
     p_done.add_argument("--commit", required=True)
@@ -415,6 +478,13 @@ def main() -> int:
     p_block.add_argument("id")
     p_block.add_argument("--reason", required=True)
     p_block.set_defaults(fn=cmd_block)
+
+    p_notes = sub.add_parser("notes")
+    p_notes.add_argument("id")
+    g_notes = p_notes.add_mutually_exclusive_group(required=True)
+    g_notes.add_argument("--set", help="replace the notes outright")
+    g_notes.add_argument("--append", help="append, pipe-separated (same style as block's reason)")
+    p_notes.set_defaults(fn=cmd_notes)
 
     p_list = sub.add_parser("list")
     p_list.add_argument(

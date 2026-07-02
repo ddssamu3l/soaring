@@ -177,26 +177,116 @@
     {
       "id": "t16",
       "title": "Wingtip lift-asymmetry sensor \u2014 the bird gradient cue (before t2)",
-      "status": "pending",
+      "status": "done",
       "deps": [
         "t1"
       ],
       "files": [
         "glider_sim.py,data_gen.py,tests/test_glider_sim.py,tests/test_data_gen.py"
       ],
-      "commit": null,
+      "commit": "1fab010",
       "notes": "sense() gains lift_asym = updraft(left wingtip) - updraft(right wingtip): the instantaneous LATERAL lift gradient \u2014 the torque cue birds center thermals with (validated: Reddy et al. PNAS 2016 + Nature 2018 \u2014 torque cue essential, vario-only much weaker). Glider gains wingspan (~17 m, ASK-21); wingtip horizontal separation scales with cos(bank) (knife-edge = no lateral sampling). Firewall-legal: field sampled at aircraft-attached points \u2014 felt, never told. Point-mass dynamics UNCHANGED (cue is sensed, not a simulated torque). SENSOR_NAMES grows to 9 \u2014 data_gen packs off SENSOR_NAMES so the factory adapts automatically; regenerate data/dataset.npz after landing. Sign: positive = left wing in stronger lift = turn left. Why before t2: first dataset the MLP sees should carry the bird sensor; also gives t4's reactive baseline the honest bird rule (turn toward the lifting wing) so predict-vs-react is fair. NOTE: t13 viewport notes say sensors (N,8) \u2014 stale; format is self-describing, read sensor_names from the file."
     },
     {
       "id": "t17",
       "title": "task.py notes command \u2014 edit a task's notes after creation",
-      "status": "pending",
+      "status": "done",
       "deps": [],
       "files": [
         "cli/task.py"
       ],
-      "commit": null,
+      "commit": "32b963b9e5d40f5d21c56464551716ccfa8ecf55",
       "notes": "add/block/done can't fix a typo or add context to an existing task's notes without ALLOW_STATE_EDIT. Add 'task.py notes <id> (--set TEXT | --append TEXT)' following start/done/block's local-save pattern (no main-commit needed, land.py reconciles)."
+    },
+    {
+      "id": "t18",
+      "title": "agentic-workflow.md: add notes to the per-command bullet list",
+      "status": "done",
+      "deps": [],
+      "files": [
+        ".claude/rules/agentic-workflow.md"
+      ],
+      "commit": "ced240f",
+      "notes": "AI review on t17 flagged: the 'When to use each command' prose list enumerates every task.py subcommand except notes (added in t17). Docs aren't wrong elsewhere -- generated CLI block + scripts/README.md already cover it -- just this one inventory bullet."
+    },
+    {
+      "id": "t19",
+      "title": "task.py done accepts pending, not just active \u2014 land.py's real fix",
+      "status": "done",
+      "deps": [],
+      "files": [
+        "cli/task.py"
+      ],
+      "commit": "6be838c9a739760dd9dffa45de988cd5ace7a2d8",
+      "notes": "land.py's done-mark step (task.py done <id> --commit <sha>) requires status==active, but the local active flag lives ONLY in the primary checkout's uncommitted working tree -- it's wiped by any ordinary git checkout/dirty-cleanup on primary between start and land (hit for real landing t18: had to discard task_list.json to satisfy land's pre-merge dirty-check, which then made the post-merge done-mark fail with 'only an active task can be marked done', requiring a manual ALLOW_MAIN_COMMIT catch-up commit). Fix: cmd_done accepts status in (active, pending) -- land.py's branch-name-derived task binding is the real proof of legitimacy, not the ephemeral local flag. Keep rejecting blocked/done (idempotency, no silent unblock)."
+    },
+    {
+      "id": "t20",
+      "title": "land.py auto-reconciles a dirty task_list.json/progress.txt instead of refusing",
+      "status": "done",
+      "deps": [],
+      "files": [
+        "cli/land.py"
+      ],
+      "commit": "6ab7bc494631bc3e845798f4017411c9534960b5",
+      "notes": "land.py's precondition check hard-refuses on ANY dirty file in the primary checkout, including task_list.json/progress.txt left locally dirty by task.py start / log.py (neither commits). This causes recurring 'main worktree is dirty' failures requiring manual git checkout/reset before every land -- easy for a future session to forget. Fix: if the ONLY dirty files are task_list.json and/or progress.txt, land.py self-authorizes (ALLOW_MAIN_COMMIT=1, same pattern as its done-mark) a small commit absorbing them before proceeding with the merge. Any OTHER dirty file still hard-refuses -- this only widens the exception for the two files task.py/log.py already own."
+    },
+    {
+      "id": "t21",
+      "title": "land.py reconcile: don't auto-commit a deleted task_list.json/progress.txt",
+      "status": "done",
+      "deps": [],
+      "files": [
+        "cli/land.py"
+      ],
+      "commit": "e1f618d37de4b10ab33b76d08d1692b1f6d70ab0",
+      "notes": "AI review on t20 flagged: _reconcile_dirty_state accepts any porcelain status on the two state files, including deletion (' D task_list.json'), which git add would stage and auto-commit to main. Scaffold's own tools only ever produce modifications; a deletion signals something went wrong and should fall back to the hard-refuse branch. Fix: parse the porcelain status code, only reconcile M/A (modified/added), not D."
+    },
+    {
+      "id": "t22",
+      "title": "task.py begin \u2014 claim + create the worktree in one step",
+      "status": "done",
+      "deps": [],
+      "files": [
+        "cli/task.py"
+      ],
+      "commit": "688071179e252a455bcf2081383cd745a8d00083",
+      "notes": "Right now claiming a task is 3 manual steps: task.py start tN, hand-derive a slug + git worktree add ../soaring-tN -b feature/tN-<slug> main, then cd. Add task.py begin tN: does start's claim, derives the branch slug from the task title automatically, creates the worktree, and prints the cd command to run next. True teleportation isn't possible (a subprocess can't cd the parent shell), so this collapses it to 'run one command, then cd' instead of 3 manual steps. task.py start stays available standalone for off-convention cases."
+    },
+    {
+      "id": "t23",
+      "title": "guard_state.py blocks hand-edits to tracked files in the primary checkout",
+      "status": "done",
+      "deps": [],
+      "files": [
+        "scripts/guard_state.py"
+      ],
+      "commit": "67937b49b1496ab641c28ed9e96fec1800567033",
+      "notes": "Direct Edit/Write to a tracked source/doc file in PRIMARY was only conventionally discouraged, not hook-enforced -- caught for real when I hand-edited agentic-workflow.md directly in primary for a t17 docs nit and had to self-catch + redo as t18. Extend guard_state.py: task_list.json/progress.txt keep their existing per-file guard (any checkout). NEW: any OTHER tracked, non-gitignored file is also blocked when the CURRENT checkout is the PRIMARY one (git rev-parse --git-dir == --git-common-dir), not a linked task worktree -- coding in a worktree is unaffected, that's the whole point. Gitignored files (CLAUDE.md, .venv, data/) stay unguarded. New break-glass: ALLOW_MAIN_EDIT=1, mirroring ALLOW_MAIN_COMMIT."
+    },
+    {
+      "id": "t24",
+      "title": "guard_state.py doc wording: not gitignored, not tracked",
+      "status": "done",
+      "deps": [],
+      "files": [
+        "scripts/guard_state.py,scripts/README.md,.claude/rules/agentic-workflow.md"
+      ],
+      "commit": "c0328aa4d22d4748d3fc814d45b93c210b855117",
+      "notes": "AI review on t23 flagged: docstring/block message/docs describe the primary-checkout rule as guarding 'tracked, non-gitignored' files, but the code actually blocks ANY non-gitignored in-repo path -- including a brand-new untracked file via Write. Blocking new-file creation in primary is the right call (new work belongs on a worktree too), so keep the behavior; just reword every 'tracked' reference to 'not gitignored' so the docs match reality."
+    },
+    {
+      "id": "t25",
+      "title": "Sim stall fidelity: hysteresis + mush ramp (kill the tick-rate stall limit cycle)",
+      "status": "pending",
+      "deps": [
+        "t2"
+      ],
+      "files": [
+        "glider_sim.py"
+      ],
+      "commit": null,
+      "notes": "Found flying the t13 viewport: binary stall flag + dt=0.1 => ~5 Hz stall/recover limit cycle when commanded speed < banked stall speed (IAS pins at Vs(bank), vertical speed square-waves +/-3 m/s). Fix ladder: (1) hysteresis band \u2014 stall below Vs, recover only above Vs + ~1.5 m/s; (2) replace binary stall_sink with a continuous mush ramp near/below Vs (real gliders mush, and smooth dynamics are friendlier to the t2 MLP); (3) optional/later: pitch/AoA state so the phugoid emerges. Deps t2 on purpose: sim stays FROZEN until the keystone plot lands so results are comparable. Regenerate data/dataset.npz after; ledger entry 2026-07-02 has full context."
     }
   ]
 }

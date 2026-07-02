@@ -22,15 +22,18 @@ new work is a direction call (theirs); resuming interrupted work is not.
 **The task loop (do exactly this):**
 ```bash
 python3 cli/task.py next                     # what's up
-python3 cli/task.py start t1                  # claim it (refuses if another active, or deps unmet)
-git worktree add ../soaring-t1 -b feature/t1-dataset main   # dedicated checkout; branch NAME carries the task id
-cd ../soaring-t1
+python3 cli/task.py begin t1                  # claim + create ../soaring-t1 on feature/t1-<slug> (prints the `cd`)
+cd ../soaring-t1                              # a subprocess can't cd the parent shell, so this step stays manual
 python3 cli/log.py "t1 started — plan: ..."
 #   ... write the code AND its test; git commit  (pre-commit hook runs check_all) ...
 cd -                                          # back to the primary checkout, on main
-python3 cli/land.py feature/t1-dataset        # serialize + gate + review + merge + cleanup; marks t1 done
+python3 cli/land.py feature/t1-<slug>         # serialize + gate + review + merge + cleanup; marks t1 done
 python3 cli/log.py "t1 done — <outcome / decision>"
 ```
+(`begin` derives the slug from the task's title — if you need the exact branch name
+again later, `git branch --list 'feature/t1-*'` finds it. For the rare off-convention
+case, `task.py start t1` + a hand-typed `git worktree add` still works exactly as
+before.)
 
 **Commit freely; ask before publishing.** Feature-branch commits are pre-authorized —
 local, reversible, they never touch main — so commit as you work (that's what trips the
@@ -41,9 +44,11 @@ is the user's call.
 
 **When to use each command** (exact signatures are in the generated block below):
 - `task.py next` / `list` — next pickable / full board (start here).
-- `task.py start tN` — claim a task (enforces single-writer + deps).
+- `task.py begin tN` — claim a task AND create its worktree in one step (prints the `cd`).
+- `task.py start tN` — claim only, no worktree (off-convention cases; `begin` calls this).
 - `task.py add` — append a pending task when new work surfaces.
 - `task.py block tN` — mark blocked when stuck.
+- `task.py notes tN` — fix/add notes without touching status (`--set` replaces, `--append` pipes on).
 - `task.py done tN` — rarely by hand; `land.py` does it on a green merge.
 - `log.py "msg"` — stamped note at every start / finish / decision.
 - `rehydrate.py` — print the board to catch up mid-session.
@@ -56,9 +61,27 @@ is the user's call.
 `tN` and marks it done on a green merge (no flag to remember). `--task tN` overrides for
 off-convention branches. Tied to the branch name.
 
+**Quick changes that don't warrant a task.** Not every change is roadmap work — a typo
+fix, a one-line doc nit. `land.py` doesn't require a task binding at all: if the branch
+name doesn't match `feature/<taskid>-...`, it just skips the done-marking step and does
+everything else (gate, review, serialized merge, rollback on failure) — same safety, zero
+`task_list.json` bookkeeping. Skip `task.py add`/`begin` entirely and worktree straight off
+a plain branch:
+```bash
+git worktree add ../soaring-quickfix -b quickfix/typo-in-readme main
+cd ../soaring-quickfix
+#   ... edit, commit (pre-commit hook still runs check_all) ...
+cd -
+python3 cli/land.py quickfix/typo-in-readme     # gates + reviews + merges; nothing to mark done
+```
+Still needs its own worktree, same as any other change — `guard_state.py` blocks hand-
+editing tracked files directly in primary regardless of whether a task is involved (see
+"What's enforced" below).
+
 **Parallelism (worktree-per-task is the standing default).** Every task, whether or not
-another task happens to be active, gets its **own** checkout: `git worktree add
-../soaring-<taskid> -b feature/<taskid>-<slug> main`. This is what makes two Claude sessions
+another task happens to be active, gets its **own** checkout (`task.py begin tN` does
+this for you: `git worktree add ../soaring-<taskid> -b feature/<taskid>-<slug> main`).
+This is what makes two Claude sessions
 safe to run at the same time without a special "are we parallel?" judgment call — a task's
 worktree can never collide with any other session's WIP, staged index, or branch switches.
 `task_list.json`'s single-writer rule (one `active` task) is still per-checkout, not a
@@ -90,6 +113,13 @@ other task.
 - **`task_list.json` and `progress.txt` are edit-locked** — a PreToolUse hook blocks direct
   Edit/Write. Change them ONLY via their CLI: `task.py` (enforces one-active-task, deps,
   real-commit-for-done) and `log.py` (append-only, auto-stamped). Break-glass: `ALLOW_STATE_EDIT=1`.
+- **No hand-editing (or creating) a non-gitignored file in the PRIMARY checkout,
+  ever** — the same `guard_state.py` hook blocks direct Edit/Write on any file that
+  isn't gitignored when the current checkout is primary (not a linked task
+  worktree) — including a brand-new file, not just an already-tracked one. Real
+  changes go on a worktree, gated + reviewed via `land.py`, task-bound or not (see
+  "Quick changes" above). Gitignored local files (`CLAUDE.md`, `.venv`, `data/`) are
+  exempt — no gate applies to them anywhere. Break-glass: `ALLOW_MAIN_EDIT=1`.
 - **`land.py`** serializes via a file lock, re-gates the *merged* result + the merge delta,
   runs the AI review, and **rolls main back on ANY failure**.
 - **No direct `git merge` into `main`** — a `pre-merge-commit` hook refuses it (main moves
@@ -105,8 +135,8 @@ other task.
 `ALLOW_EXEMPT=1` add a `.test-exempt` entry · `ALLOW_NO_TEST_UPDATE=1` edit a source without
 its test · `ALLOW_STATE_EDIT=1` hand-edit `task_list.json` or `progress.txt` · `ALLOW_NO_DOC_UPDATE=1`
 change a script without touching docs · `ALLOW_MAIN_COMMIT=1` commit directly to main ·
-`ALLOW_DIRECT_MERGE=1` merge into main without `land.py` · `BREAK_GLASS=1` force-approve
-the AI review.
+`ALLOW_DIRECT_MERGE=1` merge into main without `land.py` · `ALLOW_MAIN_EDIT=1` hand-edit
+a tracked file directly in primary · `BREAK_GLASS=1` force-approve the AI review.
 
 **Guarantees you can rely on:** every commit is gated; every land re-gates + AI-reviews
 before main moves; **main cannot move any other way** — a direct commit *or* a raw `git merge`
@@ -130,15 +160,19 @@ usage: rehydrate.py [-h] [--hook]
 
 usage: review.py [-h] [--base BASE] [--staged]
 
-usage: task.py [-h] {add,start,done,block,list,next} ...
+usage: task.py [-h] {add,start,begin,done,block,notes,list,next} ...
 
 usage: task.py add [-h] --title TITLE [--deps DEPS] [--files FILES] [--notes NOTES]
 
 usage: task.py start [-h] id
 
+usage: task.py begin [-h] id
+
 usage: task.py done [-h] --commit COMMIT id
 
 usage: task.py block [-h] --reason REASON id
+
+usage: task.py notes [-h] (--set SET | --append APPEND) id
 
 usage: task.py list [-h] [-v]
 

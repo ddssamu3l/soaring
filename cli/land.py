@@ -9,7 +9,9 @@ run at once the second blocks until the first finishes and main only moves one m
 at a time. Each landing:
 
     1. acquire the queue lock              (only one landing in flight)
-    2. require the checkout on `main`, clean
+    2. require the checkout on `main`; a dirty task_list.json/progress.txt is
+       reconciled into a commit automatically (task.py/log.py never commit their
+       own writes); any OTHER dirty file still refuses
     3. merge the feature branch --no-ff    (conflicts surface HERE, not silently)
        (the pre-merge-commit hook refuses merges into main unless LAND_ACTIVE=1,
         which we set below — so this is the ONLY sanctioned door to main)
@@ -91,6 +93,42 @@ def fail(msg: str) -> int:
     return 1
 
 
+# task.py's `start`/`block`/`notes`/`done` and log.py's appends all rewrite
+# task_list.json/progress.txt on disk without committing (that's land.py's job, see
+# 6b) -- so the primary checkout routinely carries a local, uncommitted diff in
+# exactly these two files between a `start` and the matching `land`. Refusing to
+# land on ANY dirty file forced a manual discard/reset before every single land,
+# easy for a future session to forget (hit for real landing t18/t19). These two
+# files are the only ones this scaffold's own tools ever leave dirty, so folding
+# them into a small self-authorized commit here is no riskier than land.py's
+# existing done-mark commit -- any OTHER dirty file still hard-refuses.
+RECONCILABLE = {"task_list.json", "progress.txt"}
+
+
+def _reconcile_dirty_state() -> str | None:
+    """Absorb a dirty task_list.json/progress.txt into a commit before landing.
+    Returns an error message if the tree is dirty in some other, un-reconcilable
+    way, else None. Only modifications reconcile -- a DELETED state file ('D' in
+    either porcelain status column) falls back to the hard-refuse branch instead
+    of being silently `git add`-ed (which would commit the deletion to main): the
+    scaffold's own tools never delete these files, so a deletion is a signal
+    something went wrong, not routine WIP (flagged in t20's review)."""
+    lines = [ln for ln in git(["status", "--porcelain"]).stdout.splitlines() if ln.strip()]
+    if not lines:
+        return None
+    dirty = {ln[3:] for ln in lines}
+    if not dirty <= RECONCILABLE or any("D" in ln[:2] for ln in lines):
+        return "main worktree is dirty — commit/stash first (won't stomp your work)."
+    git(["add", *sorted(dirty)])
+    commit = git(
+        ["commit", "-m", "state: reconcile local task_list.json/progress.txt before landing"],
+        check=False,
+    )
+    if commit.returncode != 0:
+        return f"couldn't reconcile dirty state before landing:\n{commit.stderr.strip()}"
+    return None
+
+
 def land(branch: str, task: str | None = None) -> int:
     # task binding: explicit --task wins; else derive it from the branch name.
     task = task or _task_from_branch(branch)
@@ -100,8 +138,9 @@ def land(branch: str, task: str | None = None) -> int:
     # 2. preconditions -----------------------------------------------------
     if out(["rev-parse", "--abbrev-ref", "HEAD"]) != "main":
         return fail("primary worktree must be on `main` to land.")
-    if git(["status", "--porcelain"]).stdout.strip():
-        return fail("main worktree is dirty — commit/stash first (won't stomp your work).")
+    dirty_err = _reconcile_dirty_state()
+    if dirty_err:
+        return fail(dirty_err)
     if git(["rev-parse", "--verify", branch], check=False).returncode != 0:
         return fail(f"branch `{branch}` does not exist.")
 

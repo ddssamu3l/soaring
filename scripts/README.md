@@ -37,11 +37,20 @@ serializes on the same lock `land.py` uses and commits the claim straight onto
 `ALLOW_MAIN_COMMIT` and never touches this checkout's HEAD) — but does **not**
 push, so publishing stays `land.py`'s job on your greenlight.
 
+`begin` is `start` + a derived-from-the-title slug + `git worktree add`, in one step
+instead of three. A subprocess can't `cd` the calling shell, so it prints the `cd`
+to run next rather than landing you there — but it collapses "claim it, hand-derive
+a slug, spell out the worktree command" down to "run this, then cd". `start` alone
+still exists for the rare off-convention case (no worktree wanted yet).
+
 ```bash
 python3 cli/task.py add --title "Log a dataset" --deps t1,t2 --files "data_gen.py" --notes "..."
-python3 cli/task.py start t2          # -> active   (refuses if another task is active)
-python3 cli/task.py done  t2 --commit <sha>   # -> done (sha must exist in git)
+python3 cli/task.py begin t2          # -> active + creates ../soaring-t2 on feature/t2-<slug>
+python3 cli/task.py start t2          # -> active only, no worktree (off-convention cases)
+python3 cli/task.py done  t2 --commit <sha>   # -> done (from active OR pending; sha must exist in git)
 python3 cli/task.py block t2 --reason "sim API changed"
+python3 cli/task.py notes t2 --set "corrected context"   # replace outright
+python3 cli/task.py notes t2 --append "extra context"    # pipe-separated append, same style as block
 python3 cli/task.py list              # status board — progress bar, deps, next-up (colorized on a TTY)
                                        #   done tasks hidden by default (git + progress.txt are the history)
 python3 cli/task.py list --full       # + done tasks, each task's notes, files, and the roadmap framing
@@ -60,6 +69,16 @@ Auto-stamps date + active task + git sha. Append-only. Like `task_list.json`, th
 edit-locked by the `guard_state.py` PreToolUse hook — direct Edit/Write is blocked, so
 `log.py` is the door (break-glass: `ALLOW_STATE_EDIT=1`). The hook only catches the *tool*,
 not this CLI's own write.
+
+`guard_state.py` also blocks direct Edit/Write on **any other non-gitignored file when
+the current checkout is PRIMARY** (not a linked task worktree) — this includes creating
+a brand-new file straight in primary, not just editing an already-tracked one; new work
+belongs on a worktree too. Real changes belong on a task's dedicated worktree, gated +
+reviewed via `land.py`, task-bound or not (see "the task binding is entirely optional",
+under `land.py` below). It detects primary vs. a linked worktree via `git rev-parse
+--git-dir` vs. `--git-common-dir` (identical only in the primary checkout). Gitignored
+local files (`CLAUDE.md`, `.venv`, `data/`) are exempt everywhere — no gate applies to
+them. Break-glass: `ALLOW_MAIN_EDIT=1`.
 
 ### `rehydrate.py` — resume from disk
 
@@ -111,6 +130,26 @@ for whoever's checkout happens to be primary next. That commit lands ON main, so
 `LAND_ACTIVE` for the merge hook) — without it the pre-commit hook silently refuses
 the commit and best-effort logging hides the failure.
 
+That done-mark call needs the task to be `active` OR `pending` in the primary's
+local `task_list.json` at merge time — `active` lives only in that checkout's
+uncommitted working tree (never committed anywhere), so any ordinary git
+operation on primary between `start` and `land` (a dirty-tree cleanup, a stray
+checkout) can wipe it silently. `task.py done` accepts `pending` too so that
+loss doesn't turn into a failed done-mark — `land.py`'s branch-name-derived
+task binding is the real proof this task landed, not that fragile flag.
+
+Before any of that, `land.py` also **reconciles a dirty `task_list.json`/
+`progress.txt`** rather than refusing outright: `task.py`'s `start`/`block`/
+`notes`/`done` and `log.py`'s appends all rewrite these two files on disk
+without committing, so the primary routinely carries a local diff in exactly
+these files between a `start` and its matching `land`. If the ONLY dirty
+files are those two, `land.py` folds them into a small self-authorized
+commit before proceeding — no riskier than the done-mark commit it already
+makes. Any OTHER dirty file still hard-refuses, unchanged — including a
+*deleted* `task_list.json`/`progress.txt`: the scaffold's own tools never
+delete these files, so a deletion is a signal something went wrong, not
+routine WIP, and must not get silently `git add`-ed onto main.
+
 **`land.py` is the ONLY door to main — enforced, not asked.** A raw `git merge` into
 main would bypass the judge *and* `check_all` (the pre-commit hook doesn't fire on
 merges). A `pre-merge-commit` hook refuses any merge into main unless it came from
@@ -129,6 +168,19 @@ python3 cli/land.py my-branch --task t1        # override when the branch can't 
 
 On success it merges, pushes (best-effort), and runs `task.py done t1 --commit <sha>`.
 A bookkeeping mismatch warns but never undoes a good merge.
+
+**The task binding is entirely optional.** If the branch name doesn't match
+`feature/<taskid>-...` and no `--task` is given, `land.py` just skips the
+done-marking step — everything else (gate, review, serialized merge, rollback
+on failure) runs exactly the same. For a change too small to warrant a task
+(a typo, a one-line doc nit), skip `task.py add`/`begin` and worktree off a
+plain branch instead:
+
+```bash
+git worktree add ../soaring-quickfix -b quickfix/typo-in-readme main
+cd ../soaring-quickfix && # ... edit, commit ... && cd -
+python3 cli/land.py quickfix/typo-in-readme    # full gate + review + merge; nothing to mark done
+```
 
 ### `review.py` — the AI reviewer (invoked by `land.py`; can run standalone)
 
