@@ -2,9 +2,11 @@
 """
 land.py -- the serialized merge queue: the only path from a feature branch to main.
 
-Work is sequential, branch-per-task in ONE checkout (no worktrees while single-writer).
-A file lock still serializes landings, so if two ever run at once the second blocks
-until the first finishes and main only moves one merge at a time. Each landing:
+Every task gets its own worktree (`../soaring-<taskid>`, standing default -- see
+"Parallelism" in .claude/rules/agentic-workflow.md); land.py itself always runs from
+the PRIMARY checkout, on `main`. A file lock still serializes landings, so if two ever
+run at once the second blocks until the first finishes and main only moves one merge
+at a time. Each landing:
 
     1. acquire the queue lock              (only one landing in flight)
     2. require the checkout on `main`, clean
@@ -17,17 +19,19 @@ until the first finishes and main only moves one merge at a time. Each landing:
     5. run the AI review on exactly what this landing adds
     6. all green -> keep the merge, best-effort push, and mark the task done
        any red   -> roll main back, report why; fix on the branch and re-land
+    7. best-effort: remove the branch's worktree (if any) + the local branch --
+       the task's isolated checkout is disposable once its work is on main
 
 The task is marked done automatically: the branch name `feature/<taskid>-<slug>`
 binds the task, so `land feature/t1-dataset` runs `task.py done t1` on success
 (override with --task tN). Best-effort -- a bookkeeping mismatch never undoes a merge.
 
-Usage (run from the checkout, on a clean main):
-    python scripts/land.py feature/t1-dataset      # derives + marks t1 done
-    python scripts/land.py my-branch --task t1      # explicit task binding
+Usage (run from the PRIMARY checkout, on a clean main):
+    python cli/land.py feature/t1-dataset      # derives + marks t1 done
+    python cli/land.py my-branch --task t1      # explicit task binding
 
-The loop: task.py start -> git checkout -b feature/<taskid>-<slug> -> commit
-(pre-commit runs check_all) -> git checkout main -> land.py.
+The loop: task.py start -> git worktree add ../soaring-t1 -b feature/t1-dataset ->
+commit (pre-commit runs check_all) -> back in the primary checkout -> land.py.
 """
 
 from __future__ import annotations
@@ -40,9 +44,10 @@ import subprocess
 import sys
 from pathlib import Path
 
-import check_all  # sibling in scripts/ (on sys.path); shares the policy logic
-
 REPO = Path(__file__).resolve().parent.parent
+
+sys.path.insert(0, str(REPO / "scripts"))  # check_all.py lives there, not next to us
+import check_all  # noqa: E402  -- shares the policy logic with the commit-time gate
 
 
 def _common_git_dir() -> Path:
@@ -59,7 +64,10 @@ def _common_git_dir() -> Path:
 
 
 LOCK = _common_git_dir() / "queue.lock"
-PY = REPO / ".venv" / "bin" / "python"
+# .venv is gitignored and lives ONLY in the primary checkout — a task's dedicated
+# worktree (the standing default) has none, so resolve the interpreter from the
+# SHARED repo root, not REPO (which is worktree-local). Same fix as the pre-commit hook.
+PY = _common_git_dir().parent / ".venv" / "bin" / "python"
 
 
 def _task_from_branch(branch: str) -> str | None:
@@ -116,37 +124,44 @@ def land(branch: str, task: str | None = None) -> int:
         git(["reset", "--hard", before], check=False)
         return fail(f"{reason}\nmain rolled back to {before[:8]}. Fix on `{branch}`, then re-land.")
 
-    # 4. deterministic gate on the merged result ---------------------------
-    print("\n── check_all on merged main ──")
-    if subprocess.run([str(PY), "scripts/check_all.py"], cwd=REPO).returncode != 0:
-        return rollback("check_all FAILED on the merged result.")
+    # 4-5. gate + review the merged result. Wrapped: an UNEXPECTED exception here (not
+    #      just a red gate) must still roll main back -- a merge sitting on main that
+    #      never got gated is worse than a landing that fails loudly. Once main moves,
+    #      "fail safe" means "fail back to before", not "crash and leave it merged".
+    try:
+        # 4. deterministic gate on the merged result -------------------------
+        print("\n── check_all on merged main ──")
+        if subprocess.run([str(PY), "scripts/check_all.py"], cwd=REPO).returncode != 0:
+            return rollback("check_all FAILED on the merged result.")
 
-    # 4b. re-enforce the commit-time policy on the MERGE DELTA. check_all's
-    #     coupling/exempt gates key off the staged set, which is empty here — so a
-    #     worktree commit that bypassed the hook (--no-verify) would slip through.
-    #     Re-check against `before...HEAD` to close that hole.
-    delta = {
-        ln.strip()
-        for ln in git(["diff", f"{before}...HEAD", "--name-only"]).stdout.splitlines()
-        if ln.strip()
-    }
-    coup = check_all.coupling_violations(delta)
-    if coup and os.environ.get("ALLOW_NO_TEST_UPDATE") != "1":
-        return rollback(
-            "test-coupling FAILED on the merge (edited code, untouched tests):\n  "
-            + "\n  ".join(coup)
-        )
-    added_ex = check_all.exemptions_added(delta, before)
-    if added_ex and os.environ.get("ALLOW_EXEMPT") != "1":
-        return rollback(
-            "merge adds test exemptions without sign-off (re-land with ALLOW_EXEMPT=1):\n  "
-            + "\n  ".join(sorted(added_ex))
-        )
+        # 4b. re-enforce the commit-time policy on the MERGE DELTA. check_all's
+        #     coupling/exempt gates key off the staged set, which is empty here — so a
+        #     worktree commit that bypassed the hook (--no-verify) would slip through.
+        #     Re-check against `before...HEAD` to close that hole.
+        delta = {
+            ln.strip()
+            for ln in git(["diff", f"{before}...HEAD", "--name-only"]).stdout.splitlines()
+            if ln.strip()
+        }
+        coup = check_all.coupling_violations(delta)
+        if coup and os.environ.get("ALLOW_NO_TEST_UPDATE") != "1":
+            return rollback(
+                "test-coupling FAILED on the merge (edited code, untouched tests):\n  "
+                + "\n  ".join(coup)
+            )
+        added_ex = check_all.exemptions_added(delta, before)
+        if added_ex and os.environ.get("ALLOW_EXEMPT") != "1":
+            return rollback(
+                "merge adds test exemptions without sign-off (re-land with ALLOW_EXEMPT=1):\n  "
+                + "\n  ".join(sorted(added_ex))
+            )
 
-    # 5. AI review of exactly what this landing adds -----------------------
-    print("\n── AI review ──")
-    if subprocess.run([str(PY), "scripts/review.py", "--base", before], cwd=REPO).returncode != 0:
-        return rollback("review BLOCKED the merge.")
+        # 5. AI review of exactly what this landing adds ---------------------
+        print("\n── AI review ──")
+        if subprocess.run([str(PY), "cli/review.py", "--base", before], cwd=REPO).returncode != 0:
+            return rollback("review BLOCKED the merge.")
+    except Exception as exc:  # noqa: BLE001 -- deliberately broad: see comment above
+        return rollback(f"land crashed mid-gate ({exc!r}).")
 
     # 6. success -----------------------------------------------------------
     if git(["remote"], check=False).stdout.strip():
@@ -161,14 +176,40 @@ def land(branch: str, task: str | None = None) -> int:
     if task:
         merged = out(["rev-parse", "HEAD"])
         r = subprocess.run(
-            [sys.executable, str(REPO / "scripts" / "task.py"), "done", task, "--commit", merged],
+            [sys.executable, str(REPO / "cli" / "task.py"), "done", task, "--commit", merged],
             cwd=REPO,
         )
         if r.returncode != 0:
-            print(f"⚠️  merged, but couldn't mark {task} done — fix via scripts/task.py.")
+            print(f"⚠️  merged, but couldn't mark {task} done — fix via cli/task.py.")
+
+    # 7. best-effort: the branch's dedicated worktree is disposable once it's on main.
+    #    Never fatal -- an unremoved worktree is just a stale directory, not a bad merge.
+    _cleanup_worktree(branch)
 
     print(f"\n\033[32mLANDED\033[0m {branch} → main  ({out(['rev-parse', '--short', 'HEAD'])})")
     return 0
+
+
+def _cleanup_worktree(branch: str) -> None:
+    """Remove the landed branch's worktree (if any) + the now-merged local branch."""
+    listing = out(["worktree", "list", "--porcelain"])
+    path = None
+    for block in listing.split("\n\n"):
+        lines = block.splitlines()
+        if f"branch refs/heads/{branch}" in lines:
+            worktree_line = next((ln for ln in lines if ln.startswith("worktree ")), None)
+            path = worktree_line.split(" ", 1)[1] if worktree_line else None
+            break
+    if path:
+        rm = git(["worktree", "remove", path], check=False)
+        if rm.returncode != 0:
+            print(f"⚠️  couldn't remove worktree {path} — remove by hand:")
+            print(f"    git worktree remove {path}")
+            return
+        print(f"removed worktree {path}")
+    br = git(["branch", "-d", branch], check=False)
+    if br.returncode != 0:
+        print(f"⚠️  couldn't delete branch {branch} — {br.stderr.strip()}")
 
 
 def main() -> int:

@@ -17,7 +17,7 @@ BRANCH="$(git rev-parse --abbrev-ref HEAD)"
 if [ "$BRANCH" = "main" ] && [ "${ALLOW_MAIN_COMMIT:-}" != "1" ]; then
   echo "pre-commit: refusing a direct commit to main." >&2
   echo "            work on a feature branch:  git checkout -b feature/<taskid>-<slug>" >&2
-  echo "            then land it:              python3 scripts/land.py feature/<...>" >&2
+  echo "            then land it:              python3 cli/land.py feature/<...>" >&2
   echo "            (override for bootstrap:   ALLOW_MAIN_COMMIT=1 git commit ...)" >&2
   exit 1
 fi

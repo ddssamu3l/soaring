@@ -192,12 +192,14 @@ def gate_exemption_guard() -> tuple[bool, str]:
 
 
 def gate_doc_coupling() -> tuple[bool, str]:
-    """A change to any scripts/*.py must also touch a workflow doc, so the docs stay
-    in sync with the mechanics. Commit-time (staged). Override: ALLOW_NO_DOC_UPDATE=1."""
+    """A change to any scripts/*.py or cli/*.py must also touch a workflow doc, so the
+    docs stay in sync with the mechanics. Commit-time (staged). Override: ALLOW_NO_DOC_UPDATE=1."""
     staged = set(_staged_files())
     if not staged:
         return True, "no staged changes — doc-coupling skipped"
-    scripts_changed = sorted(f for f in staged if f.startswith("scripts/") and f.endswith(".py"))
+    scripts_changed = sorted(
+        f for f in staged if f.startswith(("scripts/", "cli/")) and f.endswith(".py")
+    )
     if scripts_changed and not (staged & DOC_FILES):
         if os.environ.get("ALLOW_NO_DOC_UPDATE") == "1":
             return True, "scripts changed, docs untouched — allowed via override"
@@ -207,8 +209,8 @@ def gate_doc_coupling() -> tuple[bool, str]:
 
 
 def gate_docs_generated() -> tuple[bool, str]:
-    """The generated CLI reference must match the scripts' actual --help (no drift)."""
-    code, out = _run([sys.executable, "scripts/gen_docs.py", "--check"])
+    """The generated CLI reference must match the CLIs' actual --help (no drift)."""
+    code, out = _run([sys.executable, "cli/gen_docs.py", "--check"])
     return code == 0, out.strip().splitlines()[-1] if out.strip() else "cli-reference current"
 
 

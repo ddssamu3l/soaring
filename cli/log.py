@@ -5,7 +5,7 @@ Auto-prepends the date, the current active task id, and the short git sha, so
 every entry is uniform without the caller having to remember the format.
 Append-only by nature; low corruption risk (it's text), so no hard guard.
 
-Usage:  python3 scripts/log.py "t2 started — plan: 2-layer MLP, MSE, keystone plot"
+Usage:  python3 cli/log.py "t2 started — plan: 2-layer MLP, MSE, keystone plot"
 Pure stdlib; runs under any python3.
 """
 

@@ -107,7 +107,7 @@
     {
       "id": "t10",
       "title": "Move CLIs into a cli/ folder for gen_docs auto-discovery",
-      "status": "pending",
+      "status": "active",
       "deps": [],
       "files": [
         "cli/",
