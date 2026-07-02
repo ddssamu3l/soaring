@@ -108,3 +108,47 @@ def test_land_commits_the_done_mark_itself() -> None:
 def test_land_authorizes_its_own_done_mark_commit() -> None:
     land = (REPO / "cli" / "land.py").read_text()
     assert 'ALLOW_MAIN_COMMIT"] = "1"' in land, "land.py must self-authorize its main commit"
+
+
+# --- task.py add must allocate ids off main, not a stale local copy --------
+# (worktree-per-task means every worktree forks its own snapshot of task_list.json;
+# `_next_id()` used to read that local copy, so two worktrees adding a task around
+# the same time independently computed the same next id -- hit for real: two live
+# sessions both landed a task called t11. `add` must instead resolve the next id
+# from main's actual tip, so a second worktree's call sees a first worktree's
+# addition even though its OWN local file never changed.
+#
+# Static assertions, not a live git-executing integration test: a scratch-repo
+# version of this test proved to be a real hazard -- worktree/subprocess
+# interaction under pytest repeatedly resolved onto THIS repo's own main instead
+# of the isolated scratch repo, corrupting it several times despite three rounds
+# of hardening (-C pinning, a toplevel guard, --detach worktrees). Not worth the
+# risk for a `cli/` file that's exempt from needing a test at all -- this checks
+# the same properties by reading the source, matching every other test in this
+# file that touches land.py/task.py.)
+def test_task_add_resolves_ids_from_main_not_local_copy() -> None:
+    task = (REPO / "cli" / "task.py").read_text()
+    assert "_load_from_main" in task, "add must read task_list.json off main's tip"
+    assert '"git", "show"' in task, "id allocation must read via git show, not the local file"
+
+
+def test_task_add_serializes_on_lands_lock() -> None:
+    task = (REPO / "cli" / "task.py").read_text()
+    land = (REPO / "cli" / "land.py").read_text()
+    assert 'LOCK = _common_git_dir() / "queue.lock"' in task
+    assert 'LOCK = _common_git_dir() / "queue.lock"' in land, "add and land must share one lock"
+    assert "fcntl.flock(lockf, fcntl.LOCK_EX)" in task
+
+
+def test_task_add_commits_via_plumbing_not_git_commit() -> None:
+    # commit-tree/update-ref never run hooks, so this needs no ALLOW_MAIN_COMMIT and
+    # never touches the calling checkout's HEAD -- unlike a plain `git commit`.
+    task = (REPO / "cli" / "task.py").read_text()
+    assert '"commit-tree"' in task
+    assert '"update-ref", "refs/heads/main"' in task
+    assert '"git", "commit"' not in task, "add must not use a plain `git commit` on main"
+
+
+def test_task_add_does_not_push() -> None:
+    task = (REPO / "cli" / "task.py").read_text()
+    assert '"push"' not in task, "add must not publish -- that stays land.py's job"

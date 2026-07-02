@@ -10,6 +10,15 @@ blocks direct Edit/Write of task_list.json, so this CLI is the only door in.
 Pure stdlib on purpose: hooks and land.py call it, and it must never depend on
 the project venv.
 
+`add` allocates ids from `main`'s actual tip, not this checkout's local copy --
+worktree-per-task means every worktree forks its own stale snapshot, so two
+sessions adding a task around the same time used to compute the same next id
+(hit for real: two sessions both got t11). `add` now serializes on the SAME
+lock `land.py` uses and commits the claim straight onto `refs/heads/main` (git
+plumbing, no `git commit` -- doesn't touch this checkout's HEAD, doesn't need
+`ALLOW_MAIN_COMMIT`, doesn't push). Falls back to a local-only add if `main`
+can't be resolved (fresh/bootstrap repo) so `add` never hard-fails on that.
+
 Commands:
     task.py add   --title T [--deps a,b] [--files "a.py;b.py"] [--notes N]
     task.py start <id>              # -> active   (refuses if another is active)
@@ -22,17 +31,32 @@ Commands:
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
 import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import textwrap
 from pathlib import Path
 from typing import Any
 
 REPO = Path(__file__).resolve().parent.parent
 STATE = REPO / "task_list.json"
+
+
+def _common_git_dir() -> Path:
+    """The SHARED .git dir across all linked worktrees -- duplicated from land.py
+    (not imported) so task.py stays dependency-free of check_all/the venv."""
+    r = subprocess.run(
+        ["git", "rev-parse", "--git-common-dir"], cwd=REPO, capture_output=True, text=True
+    )
+    p = Path(r.stdout.strip())
+    return p if p.is_absolute() else (REPO / p)
+
+
+LOCK = _common_git_dir() / "queue.lock"  # same lock land.py uses -- one main-mutation at a time
 
 
 def _load() -> dict[str, Any]:
@@ -87,16 +111,94 @@ def _err(msg: str) -> int:
     return 1
 
 
+def _load_from_main() -> tuple[dict[str, Any], str] | None:
+    """task_list.json off main's actual tip -- the canonical source for id
+    allocation, not this checkout's possibly-stale local copy. None if `main`
+    can't be resolved (fresh/bootstrap repo); caller falls back to `_load()`."""
+    sha = subprocess.run(
+        ["git", "rev-parse", "main"], cwd=REPO, capture_output=True, text=True
+    ).stdout.strip()
+    if not sha:
+        return None
+    show = subprocess.run(
+        ["git", "show", f"{sha}:task_list.json"], cwd=REPO, capture_output=True, text=True
+    )
+    if show.returncode != 0:
+        return None
+    return json.loads(show.stdout), sha
+
+
+def _commit_onto_main(data: dict[str, Any], main_sha: str, message: str) -> str | None:
+    """Commit `data` as task_list.json directly onto refs/heads/main via plumbing
+    (hash-object / read-tree / write-tree / commit-tree), never touching this
+    checkout's HEAD or working tree. Plumbing doesn't run hooks, so this needs
+    no ALLOW_MAIN_COMMIT -- it's a structured state update through its own
+    sanctioned CLI, the same reasoning task_list.json's edit-lock already rests
+    on. Returns the new sha, or None on any failure (best-effort: the caller
+    falls back to a local-only add rather than hard-failing)."""
+    blob = subprocess.run(
+        ["git", "hash-object", "-w", "--stdin"],
+        cwd=REPO,
+        input=json.dumps(data, indent=2) + "\n",
+        capture_output=True,
+        text=True,
+    )
+    if blob.returncode != 0:
+        return None
+    blob_sha = blob.stdout.strip()
+
+    with tempfile.TemporaryDirectory() as tmp:
+        env = os.environ.copy()
+        env["GIT_INDEX_FILE"] = str(Path(tmp) / "index")
+        if subprocess.run(["git", "read-tree", main_sha], cwd=REPO, env=env).returncode != 0:
+            return None
+        upd = subprocess.run(
+            ["git", "update-index", "--add", "--cacheinfo", f"100644,{blob_sha},task_list.json"],
+            cwd=REPO,
+            env=env,
+        )
+        if upd.returncode != 0:
+            return None
+        tree = subprocess.run(
+            ["git", "write-tree"], cwd=REPO, env=env, capture_output=True, text=True
+        )
+        if tree.returncode != 0:
+            return None
+        tree_sha = tree.stdout.strip()
+
+    commit = subprocess.run(
+        ["git", "commit-tree", tree_sha, "-p", main_sha, "-m", message],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+    )
+    if commit.returncode != 0:
+        return None
+    new_sha = commit.stdout.strip()
+
+    # Atomic compare-and-swap: refuses if main moved since main_sha was read. Shouldn't
+    # happen -- we hold LOCK, which land.py also acquires -- but never clobber blind.
+    cas = subprocess.run(["git", "update-ref", "refs/heads/main", new_sha, main_sha], cwd=REPO)
+    return new_sha if cas.returncode == 0 else None
+
+
 def cmd_add(a: argparse.Namespace) -> int:
-    data = _load()
     deps = [d for d in (a.deps.split(",") if a.deps else []) if d]
-    for d in deps:
-        if not _find(data, d):
-            return _err(f"dep {d!r} does not exist")
     files = [f for f in (a.files.split(";") if a.files else []) if f]
-    tid = _next_id(data)
-    data["tasks"].append(
-        {
+
+    LOCK.parent.mkdir(exist_ok=True)
+    with open(LOCK, "w") as lockf:
+        # Serializes with land.py (same lock) and any concurrent `add`, so id
+        # allocation can never race between "read the next id" and "claim it".
+        fcntl.flock(lockf, fcntl.LOCK_EX)
+
+        canonical = _load_from_main()
+        ref_data = canonical[0] if canonical else _load()
+        for d in deps:
+            if not _find(ref_data, d):
+                return _err(f"dep {d!r} does not exist")
+        tid = _next_id(ref_data)
+        entry = {
             "id": tid,
             "title": a.title,
             "status": "pending",
@@ -105,8 +207,22 @@ def cmd_add(a: argparse.Namespace) -> int:
             "commit": None,
             "notes": a.notes or "",
         }
-    )
-    _save(data)
+
+        if canonical:
+            main_data, main_sha = canonical
+            main_data["tasks"].append(entry)
+            if _commit_onto_main(main_data, main_sha, f"task: add {tid} — {a.title}") is None:
+                print(
+                    f"⚠️  couldn't commit {tid}'s id claim onto main "
+                    "(added locally only) — sync manually if this recurs.",
+                    file=sys.stderr,
+                )
+
+    # Sync THIS checkout's own view: keep whatever local state already diverged (e.g.
+    # this worktree's own task mid-flight) and layer the new entry on top of it.
+    local_data = _load()
+    local_data["tasks"].append(entry)
+    _save(local_data)
     print(f"added {tid}: {a.title}")
     return 0
 
