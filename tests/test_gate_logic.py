@@ -370,3 +370,64 @@ def test_task_done_rejects_already_done(tmp_path: Path, monkeypatch: pytest.Monk
     monkeypatch.setattr(task_cli, "_git_has", lambda sha: True)
     task_cli.STATE.write_text(json.dumps(_state("done")))
     assert task_cli.cmd_done(_done_ns("t1")) != 0
+
+
+# --- task.py begin -- start + derive a slug + git worktree add, one step (2026-07-02) --
+# `subprocess.run` is monkeypatched to a recorder rather than allowed to run for real:
+# `git worktree add` against the actual REPO would create a real worktree as a test
+# side effect -- not the corruption-class hazard from earlier (no GIT_DIR inheritance
+# risk, it's a real intended operation, not an isolated-tmp-dir one), but still not
+# something a test run should do to the real repo. Verifying the exact command is
+# built correctly is the same coverage without the side effect.
+def _begin_ns(tid: str) -> argparse.Namespace:
+    return argparse.Namespace(id=tid)
+
+
+def test_task_slug_derivation() -> None:
+    task_cli = _load_task_module()
+    assert task_cli._slug("Fix Some Thing!!") == "fix-some-thing"
+    assert task_cli._slug("  leading/trailing -- spaces  ") == "leading-trailing-spaces"
+    assert task_cli._slug("") == "task"
+    assert not task_cli._slug("x" * 100).endswith("-")
+
+
+def test_task_begin_starts_then_creates_worktree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    task_cli = _load_task_module()
+    monkeypatch.setattr(task_cli, "STATE", tmp_path / "task_list.json")
+    task_cli.STATE.write_text(json.dumps(_state("pending")))
+
+    calls = []
+
+    def fake_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(task_cli.subprocess, "run", fake_run)
+
+    assert task_cli.cmd_begin(_begin_ns("t1")) == 0
+    assert json.loads(task_cli.STATE.read_text())["tasks"][0]["status"] == "active"
+    assert len(calls) == 1
+    cmd = calls[0]
+    assert cmd[:3] == ["git", "worktree", "add"]
+    assert cmd[3] == "../soaring-t1"
+    assert cmd[4] == "-b"
+    assert cmd[5] == "feature/t1-some-task"
+    assert cmd[6] == "main"
+
+
+def test_task_begin_refuses_if_start_refuses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # "blocked" tasks CAN be resumed (start accepts pending or blocked) -- use
+    # "done" instead, the actual case start refuses.
+    task_cli = _load_task_module()
+    monkeypatch.setattr(task_cli, "STATE", tmp_path / "task_list.json")
+    task_cli.STATE.write_text(json.dumps(_state("done")))
+
+    calls: list[list[str]] = []
+    monkeypatch.setattr(task_cli.subprocess, "run", lambda cmd, **kw: calls.append(cmd))
+
+    assert task_cli.cmd_begin(_begin_ns("t1")) != 0
+    assert not calls, "must not touch git if start itself refused"

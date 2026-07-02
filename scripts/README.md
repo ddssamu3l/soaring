@@ -37,9 +37,16 @@ serializes on the same lock `land.py` uses and commits the claim straight onto
 `ALLOW_MAIN_COMMIT` and never touches this checkout's HEAD) — but does **not**
 push, so publishing stays `land.py`'s job on your greenlight.
 
+`begin` is `start` + a derived-from-the-title slug + `git worktree add`, in one step
+instead of three. A subprocess can't `cd` the calling shell, so it prints the `cd`
+to run next rather than landing you there — but it collapses "claim it, hand-derive
+a slug, spell out the worktree command" down to "run this, then cd". `start` alone
+still exists for the rare off-convention case (no worktree wanted yet).
+
 ```bash
 python3 cli/task.py add --title "Log a dataset" --deps t1,t2 --files "data_gen.py" --notes "..."
-python3 cli/task.py start t2          # -> active   (refuses if another task is active)
+python3 cli/task.py begin t2          # -> active + creates ../soaring-t2 on feature/t2-<slug>
+python3 cli/task.py start t2          # -> active only, no worktree (off-convention cases)
 python3 cli/task.py done  t2 --commit <sha>   # -> done (from active OR pending; sha must exist in git)
 python3 cli/task.py block t2 --reason "sim API changed"
 python3 cli/task.py notes t2 --set "corrected context"   # replace outright

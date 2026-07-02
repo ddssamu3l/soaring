@@ -25,9 +25,15 @@ checkout's uncommitted working tree, so it's easy to lose between `start` and
 branch-name-derived task binding is the real proof a task landed, not that
 fragile flag. `blocked`/`done` still refuse (no silent unblock/double-mark).
 
+`begin` is `start` + a derived-from-the-title slug + `git worktree add`, one step
+instead of three -- a subprocess can't `cd` the calling shell, so it prints the
+`cd` to run next rather than actually landing you there. `start` alone still
+exists for the rare off-convention case (no worktree wanted yet).
+
 Commands:
     task.py add   --title T [--deps a,b] [--files "a.py;b.py"] [--notes N]
     task.py start <id>              # -> active   (refuses if another is active)
+    task.py begin <id>              # start + create ../soaring-<id> worktree, prints `cd`
     task.py done  <id> --commit SHA # -> done     (from active OR pending; SHA must exist in git)
     task.py block <id> --reason R   # -> blocked
     task.py notes <id> (--set T | --append T)  # edit notes without touching status
@@ -41,6 +47,7 @@ import argparse
 import fcntl
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -253,6 +260,33 @@ def cmd_start(a: argparse.Namespace) -> int:
     return 0
 
 
+def _slug(title: str) -> str:
+    s = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
+    return (s[:40].rstrip("-")) or "task"
+
+
+def cmd_begin(a: argparse.Namespace) -> int:
+    """`start` + derive-a-slug + `git worktree add`, in one step -- a subprocess
+    can't `cd` the parent shell, so this can't teleport you into the worktree, but
+    it collapses the previous 3 hand-typed steps (start, hand-derive a slug, git
+    worktree add) down to "run this, then cd"."""
+    rc = cmd_start(a)
+    if rc != 0:
+        return rc
+    t = _find(_load(), a.id)
+    assert t is not None  # cmd_start just verified it exists and is now active
+    branch = f"feature/{a.id}-{_slug(t['title'])}"
+    worktree = f"../soaring-{a.id}"
+    wt = subprocess.run(["git", "worktree", "add", worktree, "-b", branch, "main"], cwd=REPO)
+    if wt.returncode != 0:
+        return _err(
+            f"claimed {a.id} but worktree creation failed -- create it by hand: "
+            f"git worktree add {worktree} -b {branch} main"
+        )
+    print(f"\nnext: cd {worktree}")
+    return 0
+
+
 def cmd_done(a: argparse.Namespace) -> int:
     data = _load()
     t = _find(data, a.id)
@@ -430,6 +464,10 @@ def main() -> int:
     p_start = sub.add_parser("start")
     p_start.add_argument("id")
     p_start.set_defaults(fn=cmd_start)
+
+    p_begin = sub.add_parser("begin")
+    p_begin.add_argument("id")
+    p_begin.set_defaults(fn=cmd_begin)
 
     p_done = sub.add_parser("done")
     p_done.add_argument("id")

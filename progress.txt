@@ -24,3 +24,4 @@
 2026-07-02  [- 961f123]  t19 started — plan: cmd_done accepts status in (active, pending), rejects blocked/done; this is the real fix for the recurring 'couldn't mark done' gap hit landing t14-t18.
 2026-07-02  [- 75a514d]  t20 started — plan: land.py reconciles a dirty task_list.json/progress.txt into a self-authorized commit instead of hard-refusing; anything else dirty still refuses.
 2026-07-02  [- fc7dbf0]  t21 started — plan: land.py's dirty-reconcile follow-up from t20's review; only M/A statuses reconcile, a D falls back to hard-refuse.
+2026-07-02  [- 465c5d9]  t22 started — plan: task.py begin subcommand collapsing start + slug + git worktree add into one step, prints the cd command.
