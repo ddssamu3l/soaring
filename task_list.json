@@ -166,7 +166,7 @@
     {
       "id": "t15",
       "title": "task.py list hides done tasks by default",
-      "status": "pending",
+      "status": "active",
       "deps": [],
       "files": [
         "cli/task.py"

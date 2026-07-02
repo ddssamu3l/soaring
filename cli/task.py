@@ -319,8 +319,17 @@ def cmd_list(a: argparse.Namespace) -> int:
         )
         print(paint(frame, "2"), end="\n\n")
 
-    width = min(max(len(t["title"]) for t in tasks), 52)
-    for t in tasks:
+    # done tasks only grow the list as the roadmap progresses; hide them from the
+    # default view so it stays a "what's left" board, not a full history (git +
+    # progress.txt already are that). -v/--full brings them back.
+    shown = tasks if full else [t for t in tasks if t["status"] != "done"]
+    if not shown:
+        print(paint("  (everything done — pass -v/--full to see it)", "2"))
+        print()
+        return 0
+
+    width = min(max(len(t["title"]) for t in shown), 52)
+    for t in shown:
         st = t["status"]
         title = t["title"]
         title = (title[: width - 1] + "…") if len(title) > width else title.ljust(width)
