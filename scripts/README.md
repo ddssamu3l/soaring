@@ -42,6 +42,8 @@ python3 cli/task.py add --title "Log a dataset" --deps t1,t2 --files "data_gen.p
 python3 cli/task.py start t2          # -> active   (refuses if another task is active)
 python3 cli/task.py done  t2 --commit <sha>   # -> done (sha must exist in git)
 python3 cli/task.py block t2 --reason "sim API changed"
+python3 cli/task.py notes t2 --set "corrected context"   # replace outright
+python3 cli/task.py notes t2 --append "extra context"    # pipe-separated append, same style as block
 python3 cli/task.py list              # status board — progress bar, deps, next-up (colorized on a TTY)
                                        #   done tasks hidden by default (git + progress.txt are the history)
 python3 cli/task.py list --full       # + done tasks, each task's notes, files, and the roadmap framing
