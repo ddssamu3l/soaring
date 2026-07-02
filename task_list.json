@@ -267,12 +267,12 @@
     {
       "id": "t24",
       "title": "guard_state.py doc wording: not gitignored, not tracked",
-      "status": "active",
+      "status": "done",
       "deps": [],
       "files": [
         "scripts/guard_state.py,scripts/README.md,.claude/rules/agentic-workflow.md"
       ],
-      "commit": null,
+      "commit": "c0328aa4d22d4748d3fc814d45b93c210b855117",
       "notes": "AI review on t23 flagged: docstring/block message/docs describe the primary-checkout rule as guarding 'tracked, non-gitignored' files, but the code actually blocks ANY non-gitignored in-repo path -- including a brand-new untracked file via Write. Blocking new-file creation in primary is the right call (new work belongs on a worktree too), so keep the behavior; just reword every 'tracked' reference to 'not gitignored' so the docs match reality."
     }
   ]
