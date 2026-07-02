@@ -93,6 +93,14 @@ failure). It resolves its own interpreter (and `.venv`) from the SHARED repo roo
 its own worktree, since a task's dedicated worktree (the standing default) has no
 `.venv` of its own.
 
+On a green land it also **commits and pushes the task's done-mark itself**, inside
+the same lock — `task.py done` only rewrites `task_list.json` on disk, so `land.py`
+has to be the one to commit that edit, or every land leaves main's working tree dirty
+for whoever's checkout happens to be primary next. That commit lands ON main, so
+`land.py` also sets `ALLOW_MAIN_COMMIT=1` for itself (same self-authorization as
+`LAND_ACTIVE` for the merge hook) — without it the pre-commit hook silently refuses
+the commit and best-effort logging hides the failure.
+
 **`land.py` is the ONLY door to main — enforced, not asked.** A raw `git merge` into
 main would bypass the judge *and* `check_all` (the pre-commit hook doesn't fire on
 merges). A `pre-merge-commit` hook refuses any merge into main unless it came from

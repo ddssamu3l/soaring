@@ -170,9 +170,12 @@ def land(branch: str, task: str | None = None) -> int:
             print(f"⚠️  landed locally but push failed:\n{push.stderr.strip()}")
 
     # 6b. mark the task done programmatically — the state update is a SIDE EFFECT
-    #     of landing, not a thing the agent has to remember. Best-effort: a
-    #     bookkeeping mismatch (e.g. the task wasn't `start`ed) must NEVER undo a
-    #     good merge, so we warn instead of failing.
+    #     of landing, not a thing the agent has to remember. task.py only rewrites
+    #     task_list.json on disk (it never commits), so land.py commits + pushes
+    #     that edit itself here, still inside the flock — otherwise the dirty file
+    #     is left for whoever's checkout happens to be primary next to stumble into.
+    #     Best-effort: a bookkeeping mismatch (e.g. the task wasn't `start`ed) must
+    #     NEVER undo a good merge, so we warn instead of failing.
     if task:
         merged = out(["rev-parse", "HEAD"])
         r = subprocess.run(
@@ -181,6 +184,15 @@ def land(branch: str, task: str | None = None) -> int:
         )
         if r.returncode != 0:
             print(f"⚠️  merged, but couldn't mark {task} done — fix via cli/task.py.")
+        else:
+            git(["add", "task_list.json"])
+            commit = git(["commit", "-m", f"task: mark {task} done @ {merged[:8]}"], check=False)
+            if commit.returncode != 0:
+                print(f"⚠️  {task} marked done on disk but the commit failed — commit by hand.")
+            elif git(["remote"], check=False).stdout.strip():
+                push = git(["push", "origin", "main"], check=False)
+                if push.returncode != 0:
+                    print(f"⚠️  done-mark committed locally but push failed:\n{push.stderr.strip()}")
 
     # 7. best-effort: the branch's dedicated worktree is disposable once it's on main.
     #    Never fatal -- an unremoved worktree is just a stale directory, not a bad merge.
@@ -223,8 +235,13 @@ def main() -> int:
 
     # Authorize our own merge past the pre-merge-commit guard (.githooks/pre-merge-commit),
     # which refuses any un-sanctioned `git merge` into main. Set process-wide so every
-    # child git call (the --no-ff merge in particular) inherits it.
+    # child git call (the --no-ff merge in particular) inherits it. Also authorize our
+    # own done-mark commit (step 6b) past the pre-commit hook's "no direct commit to
+    # main" guard — land.py IS the sanctioned mechanism, same reasoning as LAND_ACTIVE.
+    # (Caught for real: the first land after this commit-the-done-mark logic landed
+    # silently failed to commit it, reproducing the exact bug it was fixing.)
     os.environ["LAND_ACTIVE"] = "1"
+    os.environ["ALLOW_MAIN_COMMIT"] = "1"
 
     LOCK.parent.mkdir(exist_ok=True)
     with open(LOCK, "w") as lockf:

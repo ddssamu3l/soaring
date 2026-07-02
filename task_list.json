@@ -115,6 +115,28 @@
       ],
       "commit": "45ad299",
       "notes": "Move CLI entrypoints into a dedicated cli/ folder so gen_docs.py globs cli/*.py instead of the hardcoded CLIS list \u2014 makes 'every CLI is documented' structural, killing the drift class the judge flagged (menu.py was silently missing from the generated ref, and docs-generated can't catch its own omission). Touches: hook paths (.githooks/, .claude/settings.json), the scripts/ test-exempt entry, land.py's sibling import of check_all, and every doc referencing scripts/<name>.py. Own branch; don't fold into other work."
+    },
+    {
+      "id": "t11",
+      "title": "land.py should commit the done-marking, not leave it dirty",
+      "status": "done",
+      "deps": [],
+      "files": [
+        "cli/land.py"
+      ],
+      "commit": "4392bde",
+      "notes": "task.py done() only mutates task_list.json on disk; land.py step 6b never commits that edit, so main is left dirty after every land until someone happens to commit it. Surfaced when t10's done-mark got stranded uncommitted inside a concurrent session's WIP checkout. Fix: land.py commits + pushes the task_list.json update itself, atomically, inside the flock."
+    },
+    {
+      "id": "t12",
+      "title": "land.py must authorize its own done-mark commit (ALLOW_MAIN_COMMIT)",
+      "status": "done",
+      "deps": [],
+      "files": [
+        "cli/land.py"
+      ],
+      "commit": "9fb99a6cf0e1a48e0c94a1818fabf6172a590275",
+      "notes": "t11's fix made land.py 'git commit' the done-mark on main, but the pre-commit hook refuses direct commits to main and land.py never set ALLOW_MAIN_COMMIT for itself -- so the very first real land under the t11 fix silently failed to commit (best-effort, so LANDED still printed), reproducing the exact bug t11 was fixing, one level deeper. Fix: land.py sets ALLOW_MAIN_COMMIT=1 process-wide alongside the existing LAND_ACTIVE=1, same self-authorization pattern already used for the merge hook."
     }
   ]
 }
