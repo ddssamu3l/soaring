@@ -235,8 +235,13 @@ def main() -> int:
 
     # Authorize our own merge past the pre-merge-commit guard (.githooks/pre-merge-commit),
     # which refuses any un-sanctioned `git merge` into main. Set process-wide so every
-    # child git call (the --no-ff merge in particular) inherits it.
+    # child git call (the --no-ff merge in particular) inherits it. Also authorize our
+    # own done-mark commit (step 6b) past the pre-commit hook's "no direct commit to
+    # main" guard — land.py IS the sanctioned mechanism, same reasoning as LAND_ACTIVE.
+    # (Caught for real: the first land after this commit-the-done-mark logic landed
+    # silently failed to commit it, reproducing the exact bug it was fixing.)
     os.environ["LAND_ACTIVE"] = "1"
+    os.environ["ALLOW_MAIN_COMMIT"] = "1"
 
     LOCK.parent.mkdir(exist_ok=True)
     with open(LOCK, "w") as lockf:
