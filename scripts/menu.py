@@ -34,7 +34,10 @@ SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
         "WORK ORDER  (state — the ONLY sanctioned way to touch task_list.json)",
         [
             ("python3 scripts/task.py next", "show the next pickable task"),
-            ("python3 scripts/task.py list", "full status board (all tasks + status)"),
+            (
+                "python3 scripts/task.py list",
+                "status board — progress bar, deps, what's next, active plan",
+            ),
             ("python3 scripts/task.py start t1", "claim a task — single-writer; checks deps"),
             (
                 'python3 scripts/task.py add --title "…" --deps t1 --files "x.py"',

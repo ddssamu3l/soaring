@@ -145,15 +145,72 @@ def cmd_block(a: argparse.Namespace) -> int:
     return 0
 
 
+_ST_GLYPH = {"done": "✓", "active": "▶", "blocked": "✗", "pending": "○"}
+_ST_CODE = {"done": "32", "active": "1;36", "blocked": "31", "pending": "2"}
+
+
 def cmd_list(_: argparse.Namespace) -> int:
     data = _load()
-    if not data["tasks"]:
+    tasks = data["tasks"]
+    if not tasks:
         print("(no tasks)")
         return 0
-    for t in data["tasks"]:
-        dep = f"  deps={t['deps']}" if t["deps"] else ""
-        commit = f"  @{t['commit'][:8]}" if t["commit"] else ""
-        print(f"  [{t['status']:7}] {t['id']}: {t['title']}{dep}{commit}")
+
+    color = sys.stdout.isatty()  # tint for humans; stay plain in agent/piped output
+
+    def paint(s: str, code: str) -> str:
+        return f"\033[{code}m{s}\033[0m" if color else s
+
+    total = len(tasks)
+    counts = {s: sum(1 for t in tasks if t["status"] == s) for s in _ST_CODE}
+    done_ids = {t["id"] for t in tasks if t["status"] == "done"}
+    # the next pickable task: first pending whose deps are all done
+    next_id = next(
+        (t["id"] for t in tasks if t["status"] == "pending" and set(t["deps"]) <= done_ids),
+        None,
+    )
+
+    # header: a progress bar + status counts, each tinted by its status colour
+    barw = 12
+    filled = round(counts["done"] / total * barw)
+    bar = paint("█" * filled, "32") + paint("░" * (barw - filled), "2")
+    summary = "  ".join(
+        paint(f"{counts[s]} {s}", _ST_CODE[s]) for s in ("done", "active", "blocked", "pending")
+    )
+    print(f"\n{paint('soaring — task board', '1')}")
+    print(f"  {bar}  {counts['done']}/{total}    {summary}\n")
+
+    width = min(max(len(t["title"]) for t in tasks), 52)
+    for t in tasks:
+        st = t["status"]
+        title = t["title"]
+        title = (title[: width - 1] + "…") if len(title) > width else title.ljust(width)
+        unmet = [d for d in t["deps"] if d not in done_ids]
+        dim = False
+        if st == "done":
+            note = paint(f"@{t['commit'][:8]}" if t["commit"] else "done", "2")
+        elif st == "active":
+            note = paint("← ACTIVE", "1;36")
+        elif st == "blocked":
+            reason = t["notes"].split("BLOCKED:", 1)[-1].strip() if "BLOCKED:" in t["notes"] else ""
+            note = paint("BLOCKED" + (f": {reason}" if reason else ""), "31")
+        elif t["id"] == next_id:
+            note = paint("← next", "1;32")
+        elif unmet:
+            note, dim = paint("needs " + ", ".join(unmet), "2"), True
+        else:
+            note = paint("ready", "2")
+        gly = paint(_ST_GLYPH[st], _ST_CODE[st])
+        tid = paint(t["id"].rjust(3), "1")
+        cell = paint(title, "2") if dim else (paint(title, "1;36") if st == "active" else title)
+        print(f"  {gly} {tid}  {cell}  {note}")
+
+    active = next((t for t in tasks if t["status"] == "active"), None)
+    if active and active["notes"]:
+        plan = active["notes"]
+        plan = (plan[:75] + "…") if len(plan) > 76 else plan
+        print(f"\n  {paint('↳ ' + active['id'] + ' plan:', '1;36')} {paint(plan, '2')}")
+    print()
     return 0
 
 
