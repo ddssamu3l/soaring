@@ -212,12 +212,12 @@
     {
       "id": "t19",
       "title": "task.py done accepts pending, not just active \u2014 land.py's real fix",
-      "status": "pending",
+      "status": "done",
       "deps": [],
       "files": [
         "cli/task.py"
       ],
-      "commit": null,
+      "commit": "6be838c9a739760dd9dffa45de988cd5ace7a2d8",
       "notes": "land.py's done-mark step (task.py done <id> --commit <sha>) requires status==active, but the local active flag lives ONLY in the primary checkout's uncommitted working tree -- it's wiped by any ordinary git checkout/dirty-cleanup on primary between start and land (hit for real landing t18: had to discard task_list.json to satisfy land's pre-merge dirty-check, which then made the post-merge done-mark fail with 'only an active task can be marked done', requiring a manual ALLOW_MAIN_COMMIT catch-up commit). Fix: cmd_done accepts status in (active, pending) -- land.py's branch-name-derived task binding is the real proof of legitimacy, not the ephemeral local flag. Keep rejecting blocked/done (idempotency, no silent unblock)."
     }
   ]
