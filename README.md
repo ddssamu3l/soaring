@@ -52,9 +52,11 @@ episodes that have rollouts, the model's IMAGINED flight rides along in
 violet — ghost path, ghost airframe, its own instrument column — scrubbed in
 lockstep with the true flight it was rolled from. `G` cycles predictors
 (full / twin / teacher-forced / off); violet timeline ticks mark where each
-15 s imagination begins. Watch the blindfolded twin's VARIO drift from
-reality while the full model's needle stays honest — the keystone plot,
-animated.
+15 s imagination begins. Dreams overlap (a new one starts every 5 s), so by
+default you see each dream's first 5 s — press `H` to ride the current
+dream to its full 15 s horizon (the IMAGINED panel's `t+` counter shows how
+deep you are). Watch the blindfolded twin's VARIO drift from reality while
+the full model's needle stays honest — the keystone plot, animated.
 
 ## quick menu
 ```

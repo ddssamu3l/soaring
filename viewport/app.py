@@ -19,6 +19,10 @@ Two modes over one scene (F toggles):
             lockstep with the true flight it was rolled from (rollout step h
             IS dataset row starts[i]+h; one clock, two beliefs about it).
             Violet ticks on the timeline mark where each rollout begins.
+            Rollouts overlap (a 15 s dream starts every 5 s), so by default
+            the freshest one shows and you only ever see each dream's first
+            5 s; H holds the current dream to its FULL horizon before
+            handing over -- that deep end is where compounding lives.
   FLY    -- hand-fly a REAL Simulation with the arrow keys. Left/right push
             the bank command; up/down push the speed command (pitch: pull
             up = slower). The same step() every other pilot uses -- so
@@ -70,7 +74,7 @@ SPEED_CMD_RANGE = (12.0, 50.0)  # into stall territory on purpose (it's real)
 
 HELP_REPLAY = (
     "SPACE play  |  left/right scrub  |  , . step  |  up/down speed  |  [ ] episode"
-    "  |  G ghost  |  R restart  |  F fly  |  TAB camera"
+    "  |  G ghost  |  H hold dream  |  R restart  |  F fly  |  TAB camera"
 )
 HELP_FLY = (
     "left/right bank  |  up/down speed (pull up = slower)  |  S save log"
@@ -89,6 +93,7 @@ KEY_NAMES = {
     pygame.K_r: "r",
     pygame.K_s: "s",
     pygame.K_g: "g",
+    pygame.K_h: "h",
     pygame.K_LEFT: "left arrow",
     pygame.K_RIGHT: "right arrow",
     pygame.K_UP: "up arrow",
@@ -152,6 +157,12 @@ class ViewportApp:
             if Path(rp).exists():
                 self._bind_rollouts(RolloutSet.load(rp))
         self.ghost_idx = 1 if self.ghost_channels else 0
+        # H = hold: ride the dream under the cursor to its FULL horizon
+        # instead of hopping to each fresher rollout as its start passes.
+        # _ridden remembers which dream is being ridden (view-selection
+        # memory, not playback state -- _tick stays the only state mover).
+        self.ghost_hold = False
+        self._ridden: ActiveGhost | None = None
 
         # replay state
         self.ep_pos = 0  # index into log.episode_ids
@@ -203,19 +214,33 @@ class ViewportApp:
         """The rollout the playback cursor is inside right now: of the selected
         channel's rollouts in THIS episode, the latest one already begun (its
         step h = current frame - local start, so truth and imagination share
-        the clock). None while the ghost is off or between rollouts."""
+        the clock). None while the ghost is off or between rollouts.
+
+        HOLD mode: keep riding the previously shown dream while the cursor is
+        still inside its horizon -- overlapping rollouts start every 5 s, so
+        without this you would only ever see each dream's first 5 s, never
+        the deep end where compounding shows. When the ridden dream runs out
+        (or the cursor jumps away), fall back to the freshest one."""
         if self.mode != MODE_REPLAY or self.log is None or self.ghost_idx == 0:
             return None
         ch = self.ghost_channels[self.ghost_idx - 1]
         rset = ch.rollouts
         ep_id = self.log.episode_ids[self.ep_pos]
         frame = int(self.frame_pos)
+        if (
+            self.ghost_hold
+            and (r := self._ridden) is not None
+            and r.channel is ch
+            and r.local_start <= frame <= r.local_start + rset.horizon
+        ):
+            return r
         best: ActiveGhost | None = None
         for i in np.nonzero(rset.episode == ep_id)[0]:
             local_start = int(rset.starts[i]) - self.ep_row0
             if local_start <= frame <= local_start + rset.horizon:
                 if best is None or local_start > best.local_start:
                     best = ActiveGhost(channel=ch, i=int(i), local_start=local_start)
+        self._ridden = best
         return best
 
     def _load_episode(self, ep_pos: int) -> None:
@@ -229,6 +254,7 @@ class ViewportApp:
         self.frame_pos = 0.0
         self.playing = True
         self.banner = ""
+        self._ridden = None  # a ridden dream belongs to its episode
         self.specs = build_panel(self.flight.sensor_names, self.flight.action_names)
 
     def _reset_flight(self) -> None:
@@ -338,6 +364,13 @@ class ViewportApp:
                 self.status = "no rollouts loaded -- run keystone.py, then pass data/rollouts.npz"
             else:
                 self.ghost_idx = (self.ghost_idx + 1) % (len(self.ghost_channels) + 1)
+        elif key == "h":
+            self.ghost_hold = not self.ghost_hold
+            self.status = (
+                "HOLD: riding each dream to its full horizon"
+                if self.ghost_hold
+                else "hold off: freshest dream shows"
+            )
         elif key == "r":
             self.frame_pos = 0.0
             self.playing = True
@@ -371,7 +404,8 @@ class ViewportApp:
             state = "PLAY" if self.playing else "PAUSE"
             ghost = ""
             if self.ghost_idx > 0:
-                ghost = f"  ghost {self.ghost_channels[self.ghost_idx - 1].label}"
+                hold = " HOLD" if self.ghost_hold else ""
+                ghost = f"  ghost {self.ghost_channels[self.ghost_idx - 1].label}{hold}"
             return (
                 f"REPLAY  ep {self.log.episode_ids[self.ep_pos]}"
                 f" ({self.ep_pos + 1}/{len(self.log.episode_ids)})"
@@ -426,11 +460,14 @@ class ViewportApp:
         hud.draw_panel(surface, readings, title="TRUE" if ghost is not None else "")
         if ghost is not None:
             ghost_readings = [read(s, gp[s.name]) for s in self.specs if s.name in gp]
+            # t+ = seconds since this dream was seeded from truth: watch it
+            # reset at a handoff, grow to the full horizon under HOLD.
+            dream_s = (int(self.frame_pos) - ghost.local_start) * ghost.channel.rollouts.dt
             hud.draw_panel(
                 surface,
                 ghost_readings,
                 x=surface.get_width() - hud.PANEL_W - hud.PANEL_X,
-                title=f"IMAGINED ({ghost.channel.label})",
+                title=f"IMAGINED ({ghost.channel.label})  t+{dream_s:.1f}s",
                 title_color=GHOST_VIOLET,
             )
         if self.mode == MODE_REPLAY and self.flight is not None:

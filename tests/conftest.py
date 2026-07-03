@@ -54,7 +54,9 @@ def mini_rollouts(mini_npz: Path, tmp_path_factory: pytest.TempPathFactory) -> P
         sensor_names = d["sensor_names"]
         dt = float(d["dt"])
     rows = np.nonzero(episode == 1)[0]
-    starts = np.array([rows[2], rows[2 + MINI_H + 4]], dtype=np.int64)  # 2nd overlaps 1st's tail
+    # rollout 1 begins INSIDE rollout 0's horizon (keystone's real shape:
+    # overlapping dreams) -- the hold-vs-freshest picker tests need that.
+    starts = np.array([rows[2], rows[2 + MINI_H - 2]], dtype=np.int64)
     assert int(starts.max()) + MINI_H < int(rows.max()) + 1  # horizon stays inside episode 1
 
     true = np.stack([sensors[s : s + MINI_H + 1] for s in starts])

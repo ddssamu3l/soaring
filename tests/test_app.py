@@ -235,6 +235,42 @@ def test_ghost_follows_the_playback_cursor(ghosting: ViewportApp) -> None:
     assert g is not None and g.i == 1 and g.local_start == second
 
 
+def test_hold_rides_a_dream_to_its_full_horizon(ghosting: ViewportApp) -> None:
+    """Rollouts overlap; default shows the freshest. HOLD keeps the ridden
+    dream through later starts, hands over only when its horizon runs out."""
+    ghosting.ghost_hold = False
+    ghosting._ridden = None
+    rset = ghosting.ghost_channels[0].rollouts
+    first, second = (int(s) - ghosting.ep_row0 for s in rset.starts)
+    ghosting.frame_pos = float(first + 1)
+    assert ghosting._ghost().i == 0  # type: ignore[union-attr]  # riding dream 0
+    ghosting._input("h")
+    assert ghosting.ghost_hold and "HOLD" in ghosting.status
+    ghosting.frame_pos = float(second)  # dream 1 has begun -- default would hop
+    g = ghosting._ghost()
+    assert g is not None and g.i == 0  # still riding dream 0
+    assert "HOLD" in ghosting._status_line()
+    ghosting.frame_pos = float(first + rset.horizon + 1)  # dream 0's horizon passed
+    g = ghosting._ghost()
+    assert g is not None and g.i == 1  # handover to the freshest
+    ghosting._input("h")  # leave the shared app in default mode
+    assert not ghosting.ghost_hold
+
+
+def test_hold_does_not_leak_across_episodes(ghosting: ViewportApp) -> None:
+    """A ridden dream is meaningless in another episode's frame numbering --
+    switching episodes must drop it, not keep painting the stale rollout."""
+    rset = ghosting.ghost_channels[0].rollouts
+    ghosting.frame_pos = float(int(rset.starts[0]) - ghosting.ep_row0 + 1)
+    ghosting.ghost_hold = True
+    assert ghosting._ghost() is not None
+    ghosting._load_episode(0)  # no rollouts here
+    assert ghosting._ridden is None
+    ghosting.frame_pos = 5.0
+    assert ghosting._ghost() is None
+    ghosting.ghost_hold = False
+
+
 def test_ghost_panel_starts_true_then_diverges(ghosting: ViewportApp) -> None:
     """h=0 IS the true panel; conftest's 'full' predictor then drifts east
     2 m per step -- the imagined x must read exactly that ahead of truth."""
