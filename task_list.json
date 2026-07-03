@@ -15,7 +15,7 @@
     {
       "id": "t2",
       "title": "Rung 1 \u2014 predict the next state (MLP) + the keystone plot",
-      "status": "pending",
+      "status": "active",
       "deps": [
         "t1"
       ],
