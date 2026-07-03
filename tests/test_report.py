@@ -8,7 +8,7 @@ from pathlib import Path
 
 import numpy as np
 
-from report import plot_loss_curves, plot_lr_finder, plot_onestep_card
+from report import plot_ghosts, plot_keystone, plot_loss_curves, plot_lr_finder, plot_onestep_card
 
 
 def test_lr_finder_plot_writes_a_file(tmp_path: Path) -> None:
@@ -26,6 +26,24 @@ def test_onestep_card_plot_writes_a_file(tmp_path: Path) -> None:
         {"persistence": np.array([0.5, 2.3]), "full": np.array([0.01, 0.9])},
         out,
     )
+    assert out.stat().st_size > 0
+
+
+def test_keystone_plot_writes_a_file(tmp_path: Path) -> None:
+    out = tmp_path / "keystone.png"
+    seconds = np.linspace(0.0, 1.5, 16)
+    rising = np.linspace(0.0, 2.0, 16)
+    curves = {"full": rising * 0.1, "persistence": rising, "teacher-forced": rising * 0.05}
+    plot_keystone(seconds, {"panel (sigma)": curves, "position (m)": curves}, out)
+    assert out.stat().st_size > 0
+
+
+def test_ghosts_plot_writes_a_file(tmp_path: Path) -> None:
+    out = tmp_path / "ghosts.png"
+    gx, gy = np.meshgrid(np.linspace(-1, 1, 8), np.linspace(-1, 1, 8))
+    path = (np.linspace(0, 1, 10), np.linspace(0, 0.5, 10))
+    ghost = {"true": path, "imagined": (path[0] + 0.05, path[1] - 0.05)}
+    plot_ghosts((gx, gy, gx * gy), [ghost, ghost], out)
     assert out.stat().st_size > 0
 
 

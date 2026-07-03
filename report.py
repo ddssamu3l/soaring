@@ -40,6 +40,71 @@ def plot_lr_finder(lrs: FloatArr, losses: FloatArr, chosen: float, out: Path) ->
     plt.close(fig)
 
 
+def plot_keystone(seconds: FloatArr, panels: dict[str, dict[str, FloatArr]], out: Path) -> None:
+    """THE PLOT. One subplot per metric; within each, error vs prediction horizon
+    for every predictor.
+
+    HOW TO READ IT: persistence (gray) MUST rise -- the glider flies away from a
+    frozen snapshot; a flat persistence means the experiment is broken, not that
+    the world is easy. The model curve hugging the teacher-forced floor = errors
+    do not compound = you can PLAN through this model. The model curve rejoining
+    persistence = imagination dies there; read off the usable horizon where it
+    is still well below gray. Log scale: compounding is exponential when it
+    happens, and only a log axis shows both centimeters and hundreds of meters.
+    """
+    fig, axes = plt.subplots(1, len(panels), figsize=(5.4 * len(panels), 4.6))
+    style = {
+        "full": ("tab:blue", "-", 1.9),
+        "twin": ("tab:orange", "-", 1.6),
+        "persistence": ("gray", "-", 1.6),
+        "teacher-forced": ("tab:blue", ":", 1.2),
+    }
+    for ax, (metric, curves) in zip(axes, panels.items(), strict=True):
+        for name, curve in curves.items():
+            color, ls, lw = style.get(name, ("black", "-", 1.0))
+            # h=0 error is 0 by construction; log axes can't show it, start at h=1
+            ax.plot(seconds[1:], curve[1:], color=color, ls=ls, lw=lw, label=name)
+        ax.set_yscale("log")
+        ax.set_xlabel("prediction horizon (s)")
+        ax.set_title(metric)
+        ax.grid(alpha=0.3)
+    axes[0].set_ylabel("free-running error (log scale)")
+    axes[0].legend()
+    fig.suptitle("THE KEYSTONE: flat = can plan through it, cliff = can only react")
+    fig.tight_layout()
+    fig.savefig(out, dpi=110)
+    plt.close(fig)
+
+
+def plot_ghosts(
+    field: tuple[FloatArr, FloatArr, FloatArr],
+    ghosts: list[dict[str, tuple[FloatArr, FloatArr]]],
+    out: Path,
+) -> None:
+    """Example rollouts, top-down: the true flight (solid) vs the model's
+    imagined flight (dashed) over the updraft heatmap (red = rising air --
+    drawn for HUMAN eyes; the model never saw this field, only felt it).
+    Where the dashed line peels away from the solid one is compounding,
+    happening at a specific place in the sky instead of on an axis."""
+    gx, gy, w = field
+    fig, axes = plt.subplots(1, len(ghosts), figsize=(4.6 * len(ghosts), 4.6))
+    for ax, g in zip(axes, ghosts, strict=True):
+        ax.contourf(gx, gy, w, levels=20, cmap="YlOrRd")
+        tx, ty = g["true"]
+        px, py = g["imagined"]
+        ax.plot(tx, ty, color="black", lw=1.7, label="true flight")
+        ax.plot(px, py, color="tab:blue", lw=1.7, ls="--", label="imagined flight")
+        ax.scatter([tx[0]], [ty[0]], marker="o", s=45, color="black", zorder=5, label="start")
+        ax.set_aspect("equal")
+        ax.set_xlabel("east (m)")
+    axes[0].set_ylabel("north (m)")
+    axes[0].legend(loc="upper right", fontsize=8)
+    fig.suptitle("ghost paths: true vs imagined (15 s free-running)")
+    fig.tight_layout()
+    fig.savefig(out, dpi=110)
+    plt.close(fig)
+
+
 def plot_onestep_card(channels: list[str], series: dict[str, FloatArr], out: Path) -> None:
     """Grouped bars, one cluster per channel: the do-nothing baseline vs each model.
 
