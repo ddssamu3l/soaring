@@ -8,7 +8,7 @@ the dataset's own in-file name arrays (replay) or glider_sim's canonical
 *_NAMES tuples (live). Add a sensor -> a gauge appears. Remove one -> it
 disappears. No viewport edit either way.
 
-Two sources, one shape:
+Three sources, one shape:
   ReplayFlight -- one logged episode out of a dataset .npz. Scrubbing is pure
                   array indexing; NO physics runs during replay.
   LiveFlight   -- wraps a real Simulation and flies it tick by tick (manual
@@ -16,6 +16,12 @@ Two sources, one shape:
                   save() writes the SAME self-describing .npz schema the data
                   factory emits -- a manual flight is just another episode,
                   loadable right back into replay.
+  RolloutSet   -- keystone.py's saved imaginations (data/rollouts.npz): what
+                  the MODEL believed would happen from each start row, one
+                  (n, H+1, S) array per predictor. Not physics -- belief.
+                  Rows align 1:1 in time with dataset rows (row h of start i
+                  is dataset row starts[i]+h), which is what lets the
+                  viewport scrub truth and imagination on one clock.
 The renderer and instrument panel only ever see Frames and (n, 3) paths, so
 replay and manual flight are indistinguishable to them.
 
@@ -155,6 +161,75 @@ class FlightLog:
             true_states=self.true_states[rows],
             dt=self.dt,
         )
+
+
+# ---------------------------------------------------------------------------
+# Rollouts: the model's saved imaginations (keystone.py -> data/rollouts.npz).
+# ---------------------------------------------------------------------------
+ROLLOUT_PREFIX = "rollouts_"
+
+
+def npz_kind(path: str | Path) -> str:
+    """Classify a trajectory file by its own keys (files are self-describing,
+    so the CLI never needs a flag): 'dataset' has per-row sensors, 'rollouts'
+    has per-start imagination stacks."""
+    with np.load(path) as d:
+        if any(k.startswith(ROLLOUT_PREFIX) for k in d.files):
+            return "rollouts"
+        if "sensors" in d.files:
+            return "dataset"
+    raise ValueError(f"{path}: neither a dataset nor a rollouts file")
+
+
+@dataclass(frozen=True)
+class RolloutSet:
+    """One rollouts.npz: n imagined flights per predictor, each H+1 panels
+    long, plus the alignment metadata tying every row back to dataset rows.
+    Channel access is by NAME, same rule as everything else here."""
+
+    sensor_names: tuple[str, ...]
+    dt: float
+    horizon: int
+    starts: npt.NDArray[np.int64]  # (n,) absolute dataset row of each h=0
+    episode: npt.NDArray[np.int64]  # (n,) episode id of each start
+    true: FloatArray  # (n, H+1, S) the answer-key slice
+    predictors: dict[str, FloatArray]  # name -> (n, H+1, S) imagined panels
+
+    @classmethod
+    def load(cls, path: str | Path) -> RolloutSet:
+        with np.load(path) as d:
+            return cls(
+                sensor_names=tuple(str(n) for n in d["sensor_names"]),
+                dt=float(d["dt"]),
+                horizon=int(d["horizon"]),
+                starts=d["starts"].astype(np.int64),
+                episode=d["episode"].astype(np.int64),
+                true=d["true"].astype(np.float64),
+                predictors={
+                    k[len(ROLLOUT_PREFIX) :]: d[k].astype(np.float64)
+                    for k in d.files
+                    if k.startswith(ROLLOUT_PREFIX)
+                },
+            )
+
+    @property
+    def n(self) -> int:
+        return len(self.starts)
+
+    def panel(self, predictor: str, i: int, h: int) -> dict[str, float]:
+        """The imagined panel at step h of rollout i, name-keyed (clamped so
+        scrub math can't crash) -- feeds the IMAGINED instrument column."""
+        h = min(self.horizon, max(0, h))
+        row = self.predictors[predictor][i, h]
+        return dict(zip(self.sensor_names, row, strict=True))
+
+    def path(self, predictor: str, i: int) -> FloatArray:
+        """(H+1, 3) the imagined trajectory of rollout i -- the ghost ribbon.
+        Position channels are looked up by name like any other sensor."""
+        run = self.predictors[predictor][i]
+        cols = [self.sensor_names.index(k) for k in ("x", "y", "z")]
+        out: FloatArray = run[:, cols]
+        return out
 
 
 # ---------------------------------------------------------------------------

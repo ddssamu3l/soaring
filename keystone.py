@@ -33,6 +33,7 @@ Run:  .venv/bin/python keystone.py   (needs data/dataset.npz + data/model_*.pt)
 """
 
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import torch
@@ -52,6 +53,11 @@ from train import (
 
 HORIZON = 150  # 15 s at dt=0.1 -- generous vs the 2-10 s a planner needs
 STRIDE = 50  # a rollout start every 5 s within each test episode
+
+# persistence is a plot baseline, not an imagination -- pointless to replay
+# in the viewport (it is literally the start frame, frozen), so it stays out
+# of the saved file.
+UNSAVED_RUNS = ("persistence",)
 
 
 def rollout_starts(data: Panels, test_eps: IntArr, horizon: int, stride: int) -> IntArr:
@@ -140,6 +146,36 @@ def position_error(pred: FloatArr, true: FloatArr, x_col: int, y_col: int) -> Fl
     return out
 
 
+def save_rollouts(
+    path: Path,
+    data: Panels,
+    starts: IntArr,
+    truth: FloatArr,
+    runs: dict[str, FloatArr],
+    horizon: int,
+) -> None:
+    """Persist the rollouts so the viewport can replay imagination against
+    reality (t27). Self-describing like dataset.npz: channel names, dt and
+    alignment metadata travel IN the file, one `rollouts_<name>` array per
+    predictor. Alignment contract (what the viewport leans on): rollout row h
+    of start i is dataset row starts[i]+h -- same dt, and h=0 IS the true
+    starting panel. Regenerate anytime by rerunning this script."""
+    # one flat payload dict (typed Any because numpy's savez stub can't take
+    # a **dict alongside its allow_pickle: bool parameter)
+    payload: dict[str, Any] = {
+        "sensor_names": np.array(data.sensor_names),
+        "dt": np.array(data.dt, dtype=np.float64),
+        "horizon": np.array(horizon, dtype=np.int64),
+        "starts": starts,
+        "episode": data.episode[starts],
+        "true": truth,
+    }
+    for k, v in runs.items():
+        if k not in UNSAVED_RUNS:
+            payload["rollouts_" + k.replace("-", "_")] = v
+    np.savez_compressed(path, **payload)
+
+
 def main() -> None:
     here = Path(__file__).resolve().parent
     data = load_panels(here / "data" / "dataset.npz")
@@ -177,6 +213,10 @@ def main() -> None:
             print(f"  {name:>15} {cells}")
 
     report.plot_keystone(seconds, panels, here / "data" / "keystone.png")
+
+    # persist the rollouts for the viewport's ghost-compare (t27)
+    save_rollouts(here / "data" / "rollouts.npz", data, starts, truth, runs, HORIZON)
+    print("rollouts: data/rollouts.npz  (viewport ghosts: .venv/bin/python -m viewport.app)")
 
     # ghost paths: the keystone as a picture of flying (3 example rollouts).
     # Thermal truth for HUMAN EYES only -- the firewall forbids it as model input.

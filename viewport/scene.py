@@ -277,16 +277,21 @@ def draw_glider(
     heading: float,
     bank: float,
     wingspan: float,
+    color: RGBA | None = None,
 ) -> None:
-    """Wing + fuselage + fin strokes, nav lights on the tips."""
+    """Wing + fuselage + fin strokes, nav lights on the tips. `color` paints
+    the whole airframe one flat color with NO nav lights -- the ghost glider
+    (a model belief has no hardware); default draws the real, lit aircraft."""
     g = glider_points(x, y, z, heading, bank, wingspan)
     order = ["nose", "tail", "left_tip", "right_tip", "fin_top"]
     pts, vis = cam.project(np.stack([g[k] for k in order]))
     if not bool(np.all(vis)):
         return  # partially behind the lens: skip rather than smear
     p = dict(zip(order, pts, strict=True))
-    pygame.draw.line(surface, px(INK), p["left_tip"], p["right_tip"], 3)  # wing
-    pygame.draw.line(surface, px(INK_SECONDARY), p["nose"], p["tail"], 2)  # fuselage
-    pygame.draw.line(surface, px(INK_SECONDARY), p["tail"], p["fin_top"], 2)  # fin
-    pygame.draw.circle(surface, px(PORT_RED), p["left_tip"], 4)
-    pygame.draw.circle(surface, px(STARBOARD_GREEN), p["right_tip"], 4)
+    wing, body = (color, color) if color is not None else (INK, INK_SECONDARY)
+    pygame.draw.line(surface, px(wing), p["left_tip"], p["right_tip"], 3)  # wing
+    pygame.draw.line(surface, px(body), p["nose"], p["tail"], 2)  # fuselage
+    pygame.draw.line(surface, px(body), p["tail"], p["fin_top"], 2)  # fin
+    if color is None:
+        pygame.draw.circle(surface, px(PORT_RED), p["left_tip"], 4)
+        pygame.draw.circle(surface, px(STARBOARD_GREEN), p["right_tip"], 4)

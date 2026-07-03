@@ -6,7 +6,7 @@ import pygame
 
 from glider_sim import ACTION_NAMES, SENSOR_NAMES
 from viewport import hud
-from viewport.colors import GRID, SKY
+from viewport.colors import GHOST_VIOLET, GRID, SKY
 from viewport.panel import build_panel, read
 from viewport.scene import px
 
@@ -32,6 +32,34 @@ def test_draw_panel_paints_every_gauge() -> None:
     pixels = pygame.surfarray.pixels3d(sub)
     assert (pixels != px(SKY)).any()
     del pixels
+
+
+def test_draw_panel_at_x_with_title() -> None:
+    """The IMAGINED column: placed at an arbitrary x, titled, title colored."""
+    surface = _surface()
+    specs = build_panel(SENSOR_NAMES, ())
+    readings = [read(s, 1.0) for s in specs]
+    x = 1280 - hud.PANEL_W - hud.PANEL_X
+    hud.draw_panel(surface, readings, x=x, title="IMAGINED (full)", title_color=GHOST_VIOLET)
+    sub = surface.subsurface(pygame.Rect(x, hud.PANEL_X, hud.PANEL_W, 40))
+    pixels = pygame.surfarray.pixels3d(sub)
+    painted = (pixels != px(SKY)).any()
+    violet = bool((pixels == px(GHOST_VIOLET)).all(axis=-1).any())  # title glyphs
+    del pixels
+    assert painted and violet
+    # and the default-x card region stayed untouched sky
+    left = surface.subsurface(pygame.Rect(hud.PANEL_X, hud.PANEL_X, hud.PANEL_W, 40))
+    pixels = pygame.surfarray.pixels3d(left)
+    assert not (pixels != px(SKY)).any()
+    del pixels
+
+
+def test_timeline_marks_wear_their_color() -> None:
+    surface = _surface()
+    hud.draw_timeline(surface, 0.0, marks=[0.5], mark_color=GHOST_VIOLET)
+    track = hud.timeline_rect(surface)
+    got = surface.get_at((track.left + track.width // 2, track.top - 3))
+    assert (got.r, got.g, got.b) == px(GHOST_VIOLET)
 
 
 def test_timeline_rect_fits_surface() -> None:
