@@ -15,14 +15,14 @@
     {
       "id": "t2",
       "title": "Rung 1 \u2014 predict the next state (MLP) + the keystone plot",
-      "status": "active",
+      "status": "done",
       "deps": [
         "t1"
       ],
       "files": [
         "train.py"
       ],
-      "commit": null,
+      "commit": "547cf8fe86e13779f2599a8dec1ca0fae16206e4",
       "notes": "THE FIRST KEYSTONE. Train an MLP (state,action)->next_state, MSE. Then the money plot: roll free-running vs teacher-forced, error vs horizon \u2014 THIS PLOT IS THE GO/NO-GO GATE (flat = can plan, cliff = can only react). Fixed field, memoryless, vario-only. Zero papers (pure makemore PyTorch). Barely-a-JEPA, but the loop closes \u2014 first real milestone."
     },
     {
