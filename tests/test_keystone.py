@@ -19,6 +19,7 @@ from keystone import (
     persistence_run,
     position_error,
     rollout_starts,
+    save_rollouts,
     sigma_error,
     teacher_forced,
     true_panels,
@@ -130,6 +131,38 @@ def test_error_metrics_are_zero_for_perfect_prediction(setup) -> None:
     assert np.all(sigma_error(truth, truth, ck.stats.panel_std) == 0)
     assert np.all(position_error(truth, truth, 0, 1) == 0)
     assert np.all(channel_error(truth, truth, 2) == 0)
+
+
+def test_save_rollouts_roundtrip_pins_the_alignment(setup, tmp_path) -> None:
+    """The persisted file's contract (what the viewport scrubs by): row h of
+    rollout i aligns with dataset row starts[i]+h, h=0 IS the true start row,
+    per-predictor arrays are stored verbatim under rollouts_<name>, and the
+    persistence baseline is deliberately NOT saved."""
+    ck, data = setup
+    starts = rollout_starts(data, ck.split.test, H, STRIDE)
+    truth = true_panels(data, starts, H)
+    runs = {
+        "full": free_run(ck, data, starts, H),
+        "persistence": persistence_run(data, starts, H),
+        "teacher-forced": teacher_forced(ck, data, starts, H),
+    }
+    save_rollouts(tmp_path / "r.npz", data, starts, truth, runs, H)
+    with np.load(tmp_path / "r.npz") as d:
+        assert tuple(str(n) for n in d["sensor_names"]) == data.sensor_names
+        assert float(d["dt"]) == data.dt and int(d["horizon"]) == H
+        assert np.array_equal(d["starts"], starts)
+        assert np.array_equal(d["episode"], data.episode[starts])
+        # hyphenated run name -> underscored key; baseline stays out
+        assert {k for k in d.files if k.startswith("rollouts_")} == {
+            "rollouts_full",
+            "rollouts_teacher_forced",
+        }
+        assert np.array_equal(d["rollouts_full"], runs["full"])
+        # the viewport's clock: true row h IS the dataset row starts+h ...
+        for h in (0, H):
+            assert np.array_equal(d["true"][:, h], data.sensors[starts + h])
+        # ... and every imagination starts at the true panel
+        assert np.array_equal(d["rollouts_full"][:, 0], d["true"][:, 0])
 
 
 def test_persistence_error_grows(setup) -> None:

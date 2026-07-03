@@ -1,26 +1,21 @@
 """Tests for viewport/app.py -- the mode/input state machine, driven
 deterministically through _tick(dt)/_input(key)/_render(surface). Headless:
-no window, no clock (see conftest)."""
+no window, no clock. (mini_npz / mini_rollouts fixtures live in conftest.)"""
 
 from pathlib import Path
 
+import numpy as np
 import pygame
 import pytest
 
-from data_gen import generate_dataset
 from viewport import hud
 from viewport.app import MODE_FLY, MODE_REPLAY, ViewportApp
 from viewport.camera import Camera
-from viewport.frames import FlightLog
+from viewport.colors import GHOST_VIOLET
+from viewport.frames import FlightLog, RolloutSet
+from viewport.scene import px
 
-EP_LEN = 40
-
-
-@pytest.fixture(scope="module")
-def mini_npz(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    path = tmp_path_factory.mktemp("data") / "mini.npz"
-    generate_dataset(n_rollouts=2, steps_per_rollout=EP_LEN, out_path=path, seed=3)
-    return path
+N_EPISODES = 3  # pinned in conftest.MINI_EPISODES
 
 
 @pytest.fixture(scope="module")
@@ -81,12 +76,13 @@ def test_arrow_scrub_jumps_one_second(replaying: ViewportApp) -> None:
 
 
 def test_episode_switch_wraps(replaying: ViewportApp) -> None:
-    replaying._input("]")
-    assert replaying.ep_pos == 1
-    replaying._input("]")  # 2 episodes -> wraps to 0
+    for want in range(1, N_EPISODES):
+        replaying._input("]")
+        assert replaying.ep_pos == want
+    replaying._input("]")  # off the end -> wraps to 0
     assert replaying.ep_pos == 0
     replaying._input("[")
-    assert replaying.ep_pos == 1
+    assert replaying.ep_pos == N_EPISODES - 1
 
 
 def test_timeline_click_seeks(replaying: ViewportApp) -> None:
@@ -179,6 +175,119 @@ def test_render_every_mode_and_camera(replaying: ViewportApp) -> None:
     for _ in Camera.MODES:
         replaying._render(surface)
         replaying._input("tab")
+
+
+# ----------------------------------------------------------- ghost-compare
+@pytest.fixture(scope="module")
+def ghost_app(
+    mini_npz: Path, mini_rollouts: Path, tmp_path_factory: pytest.TempPathFactory
+) -> ViewportApp:
+    return ViewportApp(
+        data_path=mini_npz,
+        flights_dir=tmp_path_factory.mktemp("flights"),
+        rollout_paths=[mini_rollouts],
+    )
+
+
+@pytest.fixture()
+def ghosting(ghost_app: ViewportApp) -> ViewportApp:
+    """The shared ghost app parked in episode 1 (where the rollouts live),
+    ghost channel 'full' selected."""
+    ghost_app._load_episode(1)
+    ghost_app.ghost_idx = 1
+    ghost_app.playing = False
+    return ghost_app
+
+
+def test_rollouts_load_as_channels_and_start_on(ghost_app: ViewportApp) -> None:
+    """Passing a rollouts file yields one channel per predictor, already ON --
+    whoever loads imaginations wants to see them."""
+    assert [c.label for c in ghost_app.ghost_channels] == ["full", "twin"]
+    assert ghost_app.ghost_idx == 1
+
+
+def test_g_cycles_off_and_through_channels(ghosting: ViewportApp) -> None:
+    ghosting._input("g")
+    assert ghosting.ghost_idx == 2
+    ghosting._input("g")
+    assert ghosting.ghost_idx == 0  # off
+    ghosting._input("g")
+    assert ghosting.ghost_idx == 1
+
+
+def test_g_without_rollouts_says_how_to_get_them(replaying: ViewportApp) -> None:
+    replaying._input("g")
+    assert "keystone" in replaying.status
+
+
+def test_ghost_follows_the_playback_cursor(ghosting: ViewportApp) -> None:
+    """The shared clock: before the first start there is NO ghost; inside a
+    rollout the ghost is the latest start behind the cursor."""
+    rset = ghosting.ghost_channels[0].rollouts
+    first, second = (int(s) - ghosting.ep_row0 for s in rset.starts)
+    ghosting.frame_pos = float(first - 1)
+    assert ghosting._ghost() is None
+    ghosting.frame_pos = float(first + 1)
+    g = ghosting._ghost()
+    assert g is not None and g.i == 0 and g.local_start == first
+    ghosting.frame_pos = float(second)  # overlaps rollout 0's tail -> latest wins
+    g = ghosting._ghost()
+    assert g is not None and g.i == 1 and g.local_start == second
+
+
+def test_ghost_panel_starts_true_then_diverges(ghosting: ViewportApp) -> None:
+    """h=0 IS the true panel; conftest's 'full' predictor then drifts east
+    2 m per step -- the imagined x must read exactly that ahead of truth."""
+    assert ghosting.flight is not None
+    rset = ghosting.ghost_channels[0].rollouts
+    local = int(rset.starts[0]) - ghosting.ep_row0
+    at_h = ghosting.ghost_channels[0].rollouts.panel
+    assert at_h("full", 0, 0)["x"] == ghosting.flight.frame(local).sensors["x"]
+    true_x3 = ghosting.flight.frame(local + 3).sensors["x"]
+    assert at_h("full", 0, 3)["x"] == pytest.approx(true_x3 + 6.0)
+
+
+def test_ghost_off_between_episodes_without_rollouts(ghosting: ViewportApp) -> None:
+    ghosting._load_episode(0)  # rollouts live in episode 1 only
+    ghosting.frame_pos = 5.0
+    assert ghosting._ghost() is None
+    surface = pygame.Surface((640, 400))
+    ghosting._render(surface)  # and rendering does not mind
+
+
+def test_render_paints_the_ghost_violet(ghosting: ViewportApp) -> None:
+    """With the cursor inside a rollout, actual GHOST_VIOLET pixels appear
+    (path/glider/panel title all wear it; any of them proves the layer ran)."""
+    rset = ghosting.ghost_channels[0].rollouts
+    ghosting.frame_pos = float(int(rset.starts[0]) - ghosting.ep_row0 + 2)
+    ghosting.cam.mode_idx = Camera.MODES.index("topdown")
+    surface = pygame.Surface((1280, 780))
+    ghosting._render(surface)
+    pixels = pygame.surfarray.pixels3d(surface)
+    hit = bool((pixels == np.array(px(GHOST_VIOLET))).all(axis=-1).any())
+    del pixels
+    assert hit
+    assert "ghost full" in ghosting._status_line()
+
+
+def test_foreign_rollouts_are_refused(ghosting: ViewportApp, tmp_path: Path) -> None:
+    """Rollouts index absolute rows of ONE dataset; a file whose answer key
+    does not match the loaded log must be rejected, not scrubbed as garbage."""
+    rset = ghosting.ghost_channels[0].rollouts
+    np.savez_compressed(
+        tmp_path / "foreign.npz",
+        sensor_names=np.array(rset.sensor_names),
+        dt=np.array(rset.dt),
+        horizon=np.array(rset.horizon, dtype=np.int64),
+        starts=rset.starts,
+        episode=rset.episode,
+        true=rset.true + 1.0,  # answer key that matches no real rows
+        rollouts_full=rset.predictors["full"],
+    )
+    before = len(ghosting.ghost_channels)
+    ghosting._bind_rollouts(RolloutSet.load(tmp_path / "foreign.npz"))
+    assert len(ghosting.ghost_channels) == before
+    assert "not from this dataset" in ghosting.status
 
 
 # ------------------------------------------------------------------- modes

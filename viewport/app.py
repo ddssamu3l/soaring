@@ -12,7 +12,13 @@ Two modes over one scene (F toggles):
             through precomputed arrays (ReplayFlight), that's all.
             SPACE play/pause · left/right scrub 1 s · , . single-step ·
             up/down playback speed · [ ] switch episode · R restart ·
-            click the timeline to seek.
+            G cycle ghost predictor · click the timeline to seek.
+            GHOST-COMPARE: pass a rollouts.npz (keystone.py writes it) and
+            the model's IMAGINED flight rides along in violet -- ghost path,
+            ghost glider, and a second instrument column -- scrubbing in
+            lockstep with the true flight it was rolled from (rollout step h
+            IS dataset row starts[i]+h; one clock, two beliefs about it).
+            Violet ticks on the timeline mark where each rollout begins.
   FLY    -- hand-fly a REAL Simulation with the arrow keys. Left/right push
             the bank command; up/down push the speed command (pitch: pull
             up = slower). The same step() every other pilot uses -- so
@@ -35,18 +41,19 @@ Architecture notes:
 from __future__ import annotations
 
 import argparse
+from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
-import numpy.typing as npt
 import pygame
 
 from data_gen import make_world
 from glider_sim import ACTION_NAMES, SENSOR_NAMES
 from viewport import hud
 from viewport.camera import Camera
-from viewport.colors import RGBA
-from viewport.frames import FlightLog, Frame, LiveFlight, ReplayFlight
+from viewport.colors import GHOST_VIOLET
+from viewport.frames import FlightLog, Frame, LiveFlight, ReplayFlight, RolloutSet, npz_kind
 from viewport.panel import GaugeSpec, build_panel, read
 from viewport.scene import WorldScene, build_world, draw_glider, draw_path, draw_world
 
@@ -63,7 +70,7 @@ SPEED_CMD_RANGE = (12.0, 50.0)  # into stall territory on purpose (it's real)
 
 HELP_REPLAY = (
     "SPACE play  |  left/right scrub  |  , . step  |  up/down speed  |  [ ] episode"
-    "  |  R restart  |  F fly  |  TAB camera"
+    "  |  G ghost  |  R restart  |  F fly  |  TAB camera"
 )
 HELP_FLY = (
     "left/right bank  |  up/down speed (pull up = slower)  |  S save log"
@@ -81,12 +88,33 @@ KEY_NAMES = {
     pygame.K_RIGHTBRACKET: "]",
     pygame.K_r: "r",
     pygame.K_s: "s",
+    pygame.K_g: "g",
     pygame.K_LEFT: "left arrow",
     pygame.K_RIGHT: "right arrow",
     pygame.K_UP: "up arrow",
     pygame.K_DOWN: "down arrow",
 }
 ARROWS = ("left arrow", "right arrow", "up arrow", "down arrow")
+
+
+@dataclass(frozen=True)
+class GhostChannel:
+    """One selectable imagination stream: a predictor out of a RolloutSet.
+    The G key cycles OFF -> each channel -> OFF."""
+
+    label: str  # what the HUD calls it ("full", "twin", ...)
+    rollouts: RolloutSet
+    predictor: str  # key into rollouts.predictors
+
+
+@dataclass(frozen=True)
+class ActiveGhost:
+    """The rollout under the playback cursor right now: rollout `i` of
+    `channel`, whose h=0 sits at episode-local frame `local_start`."""
+
+    channel: GhostChannel
+    i: int
+    local_start: int
 
 
 class ViewportApp:
@@ -100,6 +128,7 @@ class ViewportApp:
         start_mode: str | None = None,
         flights_dir: str | Path = "data/flights",
         size: tuple[int, int] = WINDOW_SIZE,
+        rollout_paths: Sequence[str | Path] = (),
     ):
         # THE world -- the same fixed world every pilot flies (data_gen owns it).
         self.glider_def, self.air = make_world()
@@ -115,11 +144,18 @@ class ViewportApp:
         self.flight: ReplayFlight | None = None
         self.live: LiveFlight | None = None
 
-        # t2 slot: (path, flat_color) overlays -- model-predicted ghosts.
-        self.ghosts: list[tuple[npt.NDArray[np.float64], RGBA]] = []
+        # ghost-compare: saved imaginations, flattened to selectable channels.
+        # ghost_idx 0 = off, i>0 = ghost_channels[i-1]; starts ON when any
+        # rollouts loaded (whoever passes rollouts wants to SEE them).
+        self.ghost_channels: list[GhostChannel] = []
+        for rp in rollout_paths:
+            if Path(rp).exists():
+                self._bind_rollouts(RolloutSet.load(rp))
+        self.ghost_idx = 1 if self.ghost_channels else 0
 
         # replay state
         self.ep_pos = 0  # index into log.episode_ids
+        self.ep_row0 = 0  # absolute dataset row of the episode's first frame
         self.frame_pos = 0.0  # fractional frame cursor (scrub math)
         self.playing = True
         self.speed = 1.0
@@ -141,6 +177,47 @@ class ViewportApp:
             self._reset_flight()
 
     # ------------------------------------------------------------- sources
+    def _bind_rollouts(self, rset: RolloutSet) -> None:
+        """Accept a RolloutSet as ghost channels -- IF it belongs to the loaded
+        dataset. Rollout starts are absolute row indices into a specific file,
+        so a mismatched pairing (e.g. rollouts from the big dataset over a
+        manual-flight log) would scrub garbage; verify one rollout's answer-key
+        slice against the log's actual rows and refuse on any mismatch."""
+        log = self.log
+        if log is None or rset.n == 0:
+            return
+        s0 = int(rset.starts[0])
+        aligned = (
+            rset.sensor_names == log.sensor_names
+            and rset.dt == log.dt
+            and int(rset.starts.max()) + rset.horizon < len(log.sensors)
+            and np.allclose(rset.true[0], log.sensors[s0 : s0 + rset.horizon + 1])
+        )
+        if not aligned:
+            self.status = "rollouts ignored: not from this dataset"
+            return
+        for name in rset.predictors:
+            self.ghost_channels.append(GhostChannel(label=name, rollouts=rset, predictor=name))
+
+    def _ghost(self) -> ActiveGhost | None:
+        """The rollout the playback cursor is inside right now: of the selected
+        channel's rollouts in THIS episode, the latest one already begun (its
+        step h = current frame - local start, so truth and imagination share
+        the clock). None while the ghost is off or between rollouts."""
+        if self.mode != MODE_REPLAY or self.log is None or self.ghost_idx == 0:
+            return None
+        ch = self.ghost_channels[self.ghost_idx - 1]
+        rset = ch.rollouts
+        ep_id = self.log.episode_ids[self.ep_pos]
+        frame = int(self.frame_pos)
+        best: ActiveGhost | None = None
+        for i in np.nonzero(rset.episode == ep_id)[0]:
+            local_start = int(rset.starts[i]) - self.ep_row0
+            if local_start <= frame <= local_start + rset.horizon:
+                if best is None or local_start > best.local_start:
+                    best = ActiveGhost(channel=ch, i=int(i), local_start=local_start)
+        return best
+
     def _load_episode(self, ep_pos: int) -> None:
         """Point replay at episode #ep_pos (wraps around), rebuild the panel."""
         if self.log is None:
@@ -148,6 +225,7 @@ class ViewportApp:
         ids = self.log.episode_ids
         self.ep_pos = ep_pos % len(ids)
         self.flight = self.log.flight(ids[self.ep_pos])
+        self.ep_row0 = int(np.nonzero(self.log.episode == ids[self.ep_pos])[0][0])
         self.frame_pos = 0.0
         self.playing = True
         self.banner = ""
@@ -255,6 +333,11 @@ class ViewportApp:
             self._load_episode(self.ep_pos + 1)
         elif key == "[":
             self._load_episode(self.ep_pos - 1)
+        elif key == "g":
+            if not self.ghost_channels:
+                self.status = "no rollouts loaded -- run keystone.py, then pass data/rollouts.npz"
+            else:
+                self.ghost_idx = (self.ghost_idx + 1) % (len(self.ghost_channels) + 1)
         elif key == "r":
             self.frame_pos = 0.0
             self.playing = True
@@ -286,11 +369,14 @@ class ViewportApp:
         if self.mode == MODE_REPLAY and self.flight is not None and self.log is not None:
             i, n = int(self.frame_pos), self.flight.n
             state = "PLAY" if self.playing else "PAUSE"
+            ghost = ""
+            if self.ghost_idx > 0:
+                ghost = f"  ghost {self.ghost_channels[self.ghost_idx - 1].label}"
             return (
                 f"REPLAY  ep {self.log.episode_ids[self.ep_pos]}"
                 f" ({self.ep_pos + 1}/{len(self.log.episode_ids)})"
                 f"  {state} x{self.speed:g}  {i * self.flight.dt:6.1f}s"
-                f"  frame {i}/{n - 1}  cam {self.cam.mode}"
+                f"  frame {i}/{n - 1}  cam {self.cam.mode}{ghost}"
             )
         if self.live is not None:
             return f"FLY  {self.live.n * self.live.dt:6.1f}s  cam {self.cam.mode}"
@@ -311,16 +397,56 @@ class ViewportApp:
             draw_path(surface, self.cam, self.flight.path, climbs=self.flight.climbs)
         elif self.live is not None:
             draw_path(surface, self.cam, self.live.path, climbs=self.live.climbs)
-        for ghost_path, ghost_color in self.ghosts:  # t2 overlay slot
-            draw_path(surface, self.cam, ghost_path, flat_color=ghost_color)
+
+        # the ghost: what the model BELIEVED this flight would do from the
+        # latest rollout start behind the cursor -- path, airframe, and its
+        # own instrument column, all in violet, all loudly IMAGINED.
+        ghost = self._ghost()
+        gp: dict[str, float] = {}
+        if ghost is not None:
+            rset, pred = ghost.channel.rollouts, ghost.channel.predictor
+            draw_path(surface, self.cam, rset.path(pred, ghost.i), flat_color=GHOST_VIOLET)
+            gp = rset.panel(pred, ghost.i, int(self.frame_pos) - ghost.local_start)
+            draw_glider(
+                surface,
+                self.cam,
+                gp.get("x", 0.0),
+                gp.get("y", 0.0),
+                gp.get("z", 0.0),
+                gp.get("heading", 0.0),
+                gp.get("bank", 0.0),
+                self.glider_def.wingspan,
+                color=GHOST_VIOLET,
+            )
 
         draw_glider(surface, self.cam, x, y, z, heading, bank, self.glider_def.wingspan)
 
         values = {**frame.sensors, **frame.actions}
         readings = [read(spec, values[spec.name]) for spec in self.specs if spec.name in values]
-        hud.draw_panel(surface, readings)
+        hud.draw_panel(surface, readings, title="TRUE" if ghost is not None else "")
+        if ghost is not None:
+            ghost_readings = [read(s, gp[s.name]) for s in self.specs if s.name in gp]
+            hud.draw_panel(
+                surface,
+                ghost_readings,
+                x=surface.get_width() - hud.PANEL_W - hud.PANEL_X,
+                title=f"IMAGINED ({ghost.channel.label})",
+                title_color=GHOST_VIOLET,
+            )
         if self.mode == MODE_REPLAY and self.flight is not None:
-            hud.draw_timeline(surface, self.frame_pos / max(1, self.flight.n - 1))
+            marks: list[float] = []
+            if self.ghost_idx > 0 and self.log is not None:
+                rs = self.ghost_channels[self.ghost_idx - 1].rollouts
+                ep_id = self.log.episode_ids[self.ep_pos]
+                span = max(1, self.flight.n - 1)
+                for j in np.nonzero(rs.episode == ep_id)[0]:
+                    marks.append((int(rs.starts[j]) - self.ep_row0) / span)
+            hud.draw_timeline(
+                surface,
+                self.frame_pos / max(1, self.flight.n - 1),
+                marks=marks,
+                mark_color=GHOST_VIOLET,
+            )
         hud.draw_chrome(
             surface,
             self._status_line(),
@@ -368,17 +494,44 @@ class ViewportApp:
         pygame.quit()
 
 
+def _sort_files(files: list[str]) -> tuple[str | None, list[str]]:
+    """Split CLI file args into (dataset, rollout files) by their CONTENT --
+    every trajectory .npz self-describes, so there is no flag to remember.
+    No files at all = the standard pair: data/dataset.npz, plus the ghosts in
+    data/rollouts.npz whenever keystone.py has written them (either may be
+    absent -- no dataset just means the app boots into fly mode). A file the
+    user NAMED must exist; np.load's error says so plainly."""
+    if not files:
+        files = [f for f in ("data/dataset.npz", "data/rollouts.npz") if Path(f).exists()]
+    dataset: str | None = None
+    rollouts: list[str] = []
+    for f in files:
+        if npz_kind(f) == "rollouts":
+            rollouts.append(f)
+        elif dataset is None:
+            dataset = f
+        else:
+            raise SystemExit(f"two datasets given ({dataset}, {f}) -- replay takes one")
+    return dataset, rollouts
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description="soaring 3D flight viewport (replay + manual flight)")
     p.add_argument(
-        "--data",
-        default="data/dataset.npz",
-        help="dataset .npz to replay (default: data/dataset.npz)",
+        "files",
+        nargs="*",
+        help="trajectory .npz files -- a dataset and/or rollouts, told apart by "
+        "content (default: data/dataset.npz + data/rollouts.npz if present)",
     )
     p.add_argument("--episode", type=int, default=None, help="episode POSITION to open at")
     p.add_argument("--fly", action="store_true", help="start in manual-flight mode")
     args = p.parse_args()
-    app = ViewportApp(data_path=args.data, start_mode=MODE_FLY if args.fly else MODE_REPLAY)
+    dataset, rollouts = _sort_files(list(args.files))
+    app = ViewportApp(
+        data_path=dataset,
+        start_mode=MODE_FLY if args.fly else MODE_REPLAY,
+        rollout_paths=rollouts,
+    )
     if args.episode is not None and app.log is not None:
         app._load_episode(args.episode)
     app.run()

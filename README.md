@@ -24,7 +24,7 @@ uv pip install --python .venv/bin/python numpy matplotlib pygame
 ```
 Writes `soaring_first_flight.png` (top-down paths + altitude-over-time).
 
-## the viewport — watch flights, or fly one yourself
+## the viewport — watch flights, fly one yourself, or replay the model's imagination
 A 3D flight viewer (vector-projected, pygame — no GPU stack) with two modes:
 
 ```
@@ -34,15 +34,27 @@ A 3D flight viewer (vector-projected, pygame — no GPU stack) with two modes:
 ```
 
 - **REPLAY**: SPACE play/pause · ←/→ scrub · `,` `.` single-step · ↑/↓ speed ·
-  `[` `]` switch episode · click the timeline to seek.
+  `[` `]` switch episode · `G` ghost predictor · click the timeline to seek.
 - **FLY**: ←/→ bank, ↑/↓ speed (pull up = slower — it's a real energy
   exchange, you can stall). `S` saves the flight as a dataset-schema `.npz`
-  under `data/flights/` — loadable straight back into replay via `--data`.
+  under `data/flights/` — loadable straight back into replay (pass the file
+  as an argument).
 - **TAB** cycles cameras: chase / top-down analysis (the updraft heatmap IS
   the ground) / tower. `F` toggles modes. The flight ribbon is colored by
   climb rate: blue gaining, red losing.
 - The instrument panel builds itself from the dataset's own channel names —
   new sensors appear automatically.
+
+**Ghost-compare** — after `keystone.py` writes `data/rollouts.npz`, replay
+picks it up automatically (or name the files: `python -m viewport.app
+data/dataset.npz data/rollouts.npz` — they're told apart by content). In
+episodes that have rollouts, the model's IMAGINED flight rides along in
+violet — ghost path, ghost airframe, its own instrument column — scrubbed in
+lockstep with the true flight it was rolled from. `G` cycles predictors
+(full / twin / teacher-forced / off); violet timeline ticks mark where each
+15 s imagination begins. Watch the blindfolded twin's VARIO drift from
+reality while the full model's needle stays honest — the keystone plot,
+animated.
 
 ## quick menu
 ```

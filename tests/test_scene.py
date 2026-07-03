@@ -126,6 +126,22 @@ def test_draw_glider_port_light_is_red_and_north(surface: pygame.Surface) -> Non
     assert (got.r, got.g, got.b) == px(PORT_RED)
 
 
+def test_draw_glider_color_override_is_flat_and_unlit(surface: pygame.Surface) -> None:
+    """The ghost airframe: one flat violet, and NO nav lights -- a model's
+    belief must never be mistakable for the real aircraft."""
+    cam = _cam("topdown")
+    draw_glider(
+        surface, cam, 0.0, 0.0, 400.0, heading=0.0, bank=0.0, wingspan=17.0, color=GHOST_VIOLET
+    )
+    tip, _ = cam.project(np.array([[0.0, 8.5, 400.0]]))  # port tip, sim coords
+    got = surface.get_at((int(tip[0, 0]), int(tip[0, 1])))
+    assert (got.r, got.g, got.b) == px(GHOST_VIOLET)  # wing stroke, not PORT_RED
+    pixels = pygame.surfarray.pixels3d(surface)
+    no_red = not bool((pixels == px(PORT_RED)).all(axis=-1).any())
+    del pixels
+    assert no_red
+
+
 def test_draw_glider_skips_when_behind_lens(surface: pygame.Surface) -> None:
     cam = _cam("chase")
     before = pygame.surfarray.array3d(surface).copy()

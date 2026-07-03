@@ -71,20 +71,33 @@ def _text(
     surface.blit(img, r)
 
 
-def draw_panel(surface: pygame.Surface, readings: list[Reading]) -> None:
-    """The instrument column. One row per Reading, in panel order."""
-    h = 18 + len(readings) * ROW_H
+def draw_panel(
+    surface: pygame.Surface,
+    readings: list[Reading],
+    x: int = PANEL_X,
+    title: str = "",
+    title_color: tuple[float, float, float, float] = INK,
+) -> None:
+    """One instrument column: a row per Reading, in panel order. `x` places
+    the column (the default is the classic left card; the IMAGINED column
+    passes a right-side x) and `title` names whose panel this is -- TRUE vs
+    IMAGINED must never be mistakable for each other."""
+    title_h = 22 if title else 0
+    h = 18 + title_h + len(readings) * ROW_H
     card = pygame.Surface((PANEL_W, h), pygame.SRCALPHA)
     card.fill(pxa(PANEL_BG))
-    surface.blit(card, (PANEL_X, PANEL_X))
+    surface.blit(card, (x, PANEL_X))
 
     y = PANEL_X + 12
+    if title:
+        _text(surface, title, (x + 10, y), 13, title_color)
+        y += title_h
     for r in readings:
-        _text(surface, r.spec.label, (PANEL_X + 10, y), 12, INK_SECONDARY)
-        _text(surface, r.text, (PANEL_X + PANEL_W - 10, y), 14, r.color, align="right")
+        _text(surface, r.spec.label, (x + 10, y), 12, INK_SECONDARY)
+        _text(surface, r.text, (x + PANEL_W - 10, y), 14, r.color, align="right")
         if r.frac is not None:
             ty = y + 19
-            track = pygame.Rect(PANEL_X + 10, ty, TRACK_W, TRACK_H)
+            track = pygame.Rect(x + 10, ty, TRACK_W, TRACK_H)
             pygame.draw.rect(surface, px(GRID), track)
             if r.spec.kind == "center":  # zero tick
                 cx = track.left + TRACK_W // 2
@@ -100,12 +113,22 @@ def timeline_rect(surface: pygame.Surface) -> pygame.Rect:
     return pygame.Rect(TIMELINE_MARGIN, h - 46, w - 2 * TIMELINE_MARGIN, TIMELINE_H)
 
 
-def draw_timeline(surface: pygame.Surface, frac: float) -> None:
+def draw_timeline(
+    surface: pygame.Surface,
+    frac: float,
+    marks: list[float] | None = None,
+    mark_color: tuple[float, float, float, float] = INK_MUTED,
+) -> None:
+    """The scrubber. `marks` are extra ticks at fractional positions -- the
+    ghost-compare uses them to show where each saved rollout begins."""
     track = timeline_rect(surface)
     pygame.draw.rect(surface, px(GRID), track)
     fill = track.copy()
     fill.width = max(0, int(track.width * min(1.0, max(0.0, frac))))
     pygame.draw.rect(surface, px(INK_SECONDARY), fill)
+    for m in marks or []:
+        mx = track.left + int(track.width * min(1.0, max(0.0, m)))
+        pygame.draw.rect(surface, px(mark_color), pygame.Rect(mx - 1, track.top - 5, 2, 5))
     knob_x = track.left + fill.width
     pygame.draw.rect(surface, px(INK), pygame.Rect(knob_x - 2, track.top - 3, 4, track.height + 6))
 
