@@ -27,7 +27,7 @@ select = ["E", "F", "W", "I", "B", "UP"]
 [tool.mypy]
 python_version = "3.12"
 strict = true
-files = ["data_gen.py", "fly.py", "glider_sim.py", "train.py", "viewport"]
+files = ["data_gen.py", "fly.py", "glider_sim.py", "report.py", "train.py", "viewport"]
 # viewport/ is a namespace package (no __init__.py); anchor module names at
 # the repo root so viewport/colors.py is "viewport.colors", not "colors".
 explicit_package_bases = true

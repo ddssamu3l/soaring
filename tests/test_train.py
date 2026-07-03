@@ -19,14 +19,20 @@ from data_gen import generate_dataset
 from train import (
     PanelMLP,
     Panels,
+    TrainConfig,
     delta_targets,
     featurize,
     fit_stats,
+    load_checkpoint,
     load_panels,
+    lr_find,
     make_feature_spec,
     pair_indices,
     param_count,
+    save_checkpoint,
     split_episodes,
+    tensor_pairs,
+    train_model,
     undo_delta,
 )
 
@@ -43,7 +49,8 @@ def data(tmp_path_factory: pytest.TempPathFactory) -> Panels:
 
 def _fitted(data: Panels):  # stats + spec over ALL pairs -- fine for property tests
     idx = pair_indices(data.episode)
-    return idx, fit_stats(data, idx), make_feature_spec(data)
+    spec = make_feature_spec(data.sensor_names, data.action_names)
+    return idx, fit_stats(data, idx), spec
 
 
 # --- split ------------------------------------------------------------------------
@@ -121,14 +128,53 @@ def test_step0_loss_is_near_one(data: Panels) -> None:
     """TRIPWIRE 1: with z-scored targets (std 1) and a fresh net (outputs ~0), the
     untrained MSE is ~1.0 by arithmetic -- computable before training exists."""
     idx, stats, spec = _fitted(data)
-    x = torch.from_numpy(
-        featurize(data.sensors[idx], data.actions[idx], stats, spec).astype(np.float32)
-    )
-    y = torch.from_numpy(
-        delta_targets(data.sensors[idx], data.sensors[idx + 1], stats).astype(np.float32)
-    )
+    x, y = tensor_pairs(data, idx, stats, spec)
     torch.manual_seed(0)
     model = PanelMLP(spec.n_features, len(data.sensor_names))
     with torch.no_grad():
         loss = float(F.mse_loss(model(x), y))
     assert 0.5 < loss < 2.0
+
+
+# --- training loop -----------------------------------------------------------------
+def test_training_learns_and_keeps_the_best_val_weights(data: Panels) -> None:
+    """The loop must (a) actually drive loss well below the predict-the-mean 1.0
+    line, and (b) hand back the BEST epoch's weights, not the last step's."""
+    idx, stats, spec = _fitted(data)
+    x, y = tensor_pairs(data, idx, stats, spec)
+    cfg = TrainConfig(hidden=(32,), batch=64, epochs=20, seed=0)
+    model, hist = train_model(x, y, x, y, cfg, verbose=False)  # train==val: mechanics test
+    assert hist.val_loss[-1] < 0.7
+    assert hist.val_loss[-1] < hist.val_loss[0]
+    with torch.no_grad():
+        final = float(F.mse_loss(model(x), y))
+    assert final == pytest.approx(min(hist.val_loss), abs=1e-6)  # best snapshot was kept
+
+
+def test_lr_finder_runs_and_starts_near_one(data: Panels) -> None:
+    idx, stats, spec = _fitted(data)
+    x, y = tensor_pairs(data, idx, stats, spec)
+    lrs, losses = lr_find(x, y, hidden=(32,), steps=20, batch=64)
+    assert len(lrs) == len(losses) == 20
+    assert 0.5 < losses[0] < 2.0  # the first step is still basically untrained
+    assert np.all(np.isfinite(losses[:5]))  # sane in the safe zone (MAY explode later)
+
+
+# --- checkpoints ---------------------------------------------------------------------
+def test_checkpoint_roundtrip_reproduces_predictions(tmp_path, data: Panels) -> None:
+    """keystone.py trusts checkpoints completely: reloaded (model, stats, split)
+    must reproduce the original's predictions bit-for-bit, flags included."""
+    idx, stats, spec = _fitted(data)
+    split = split_episodes(data.episode)
+    x, y = tensor_pairs(data, idx, stats, spec)
+    cfg = TrainConfig(hidden=(16,), batch=64, epochs=2, seed=0)
+    model, _ = train_model(x, y, x, y, cfg, verbose=False)
+    path = tmp_path / "model.pt"
+    save_checkpoint(path, model, cfg, stats, split, data, ablate=True)
+    ck = load_checkpoint(path)
+    assert ck.ablate is True
+    assert ck.sensor_names == data.sensor_names
+    assert np.array_equal(ck.split.test, split.test)
+    assert np.allclose(ck.stats.delta_std, stats.delta_std)
+    with torch.no_grad():
+        assert torch.equal(ck.model(x), model(x))  # identical weights => identical output
