@@ -286,7 +286,7 @@
         "glider_sim.py"
       ],
       "commit": null,
-      "notes": "Found flying the t13 viewport: binary stall flag + dt=0.1 => ~5 Hz stall/recover limit cycle when commanded speed < banked stall speed (IAS pins at Vs(bank), vertical speed square-waves +/-3 m/s). Fix ladder: (1) hysteresis band \u2014 stall below Vs, recover only above Vs + ~1.5 m/s; (2) replace binary stall_sink with a continuous mush ramp near/below Vs (real gliders mush, and smooth dynamics are friendlier to the t2 MLP); (3) optional/later: pitch/AoA state so the phugoid emerges. Deps t2 on purpose: sim stays FROZEN until the keystone plot lands so results are comparable. Regenerate data/dataset.npz after; ledger entry 2026-07-02 has full context."
+      "notes": "Found flying the t13 viewport: binary stall flag + dt=0.1 => ~5 Hz stall/recover limit cycle when commanded speed < banked stall speed (IAS pins at Vs(bank), vertical speed square-waves +/-3 m/s). Fix ladder: (1) hysteresis band \u2014 stall below Vs, recover only above Vs + ~1.5 m/s; (2) replace binary stall_sink with a continuous mush ramp near/below Vs (real gliders mush, and smooth dynamics are friendlier to the t2 MLP); (3) optional/later: pitch/AoA state so the phugoid emerges. Deps t2 on purpose: sim stays FROZEN until the keystone plot lands so results are comparable. Regenerate data/dataset.npz after; ledger entry 2026-07-02 has full context. | SCOPE ADD (2026-07-03, user-found): pitch response is a step not an ease-in \u2014 vertical speed from the energy exchange is ~V*accel/G and jumps to full value on tick 1 (derivative of a rate-limited airspeed ramp = step), while bank eases via roll_rate. Fix alongside stall hysteresis/mush: either pitch/AoA state (ladder item 3, phugoid emerges) or the cheap rung \u2014 second-order airspeed (lag the acceleration itself) so vertical speed eases in/out. See progress.txt 2026-07-03 entry."
     },
     {
       "id": "t26",
@@ -302,7 +302,7 @@
     {
       "id": "t27",
       "title": "Viewport ghost-compare: save keystone rollouts + load multiple trajectory files side by side",
-      "status": "pending",
+      "status": "active",
       "deps": [
         "t2",
         "t13"
