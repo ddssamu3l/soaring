@@ -302,7 +302,7 @@
     {
       "id": "t27",
       "title": "Viewport ghost-compare: save keystone rollouts + load multiple trajectory files side by side",
-      "status": "active",
+      "status": "done",
       "deps": [
         "t2",
         "t13"
@@ -310,7 +310,7 @@
       "files": [
         "keystone.py,viewport.py,tests/test_keystone.py,tests/test_viewport.py"
       ],
-      "commit": null,
+      "commit": "8ddca0479357ab8e2c065d51803e08c1770cd70d",
       "notes": "GOAL (user, 2026-07-02): compare the model's imagined rollouts against the real flights they shadow, inside the replay viewport \u2014 more than one trajectory on screen at once, side by side, synchronized scrubbing. TWO HALVES, one feature. (A) PERSIST THE ROLLOUTS: keystone.py currently computes its runs dict in main() and discards it \u2014 add a savez_compressed to data/rollouts.npz, self-describing like dataset.npz: sensor_names, dt, horizon, starts (n,) absolute row indices into dataset.npz, episode (n,) of each start, true (n,H+1,9) answer-key slice, and one array per predictor (rollouts_full, rollouts_twin, rollouts_teacher_forced; skip persistence \u2014 trivial). Rollout rows align 1:1 in time with dataset rows from each start (same dt 0.1), h=0 row == the true start row \u2014 a test should pin rollouts_full[:,0]==true[:,0] and true[:,h]==sensors[starts+h]. Regenerate anytime via .venv/bin/python keystone.py (deterministic). (B) VIEWPORT MULTI-SOURCE: CLI file args (e.g. viewport.py data/dataset.npz data/rollouts.npz) or in-app picker; render N trajectories either side-by-side panes or ghost-overlaid in one pane (t13 amendment already asked the renderer to accept a second trajectory cheaply \u2014 this is that, generalized). One shared playback clock: a rollout's local step h maps to dataset row starts[i]+h, so true flight and imagined flight scrub in lockstep. Label IMAGINED vs TRUE loudly in the UI (different color/dash; the imagined panel is model belief, not physics). Instruments work unchanged \u2014 rollout arrays are 9-channel panels in sensor_names order. CONTEXT TRAIL: keystone.py docstring (rollout mechanics, free-running vs teacher-forced), progress.txt 2026-07-02 entries (keystone verdict FLAT: position 14.6 m @ 15 s vs persistence 352 m; twin vario diverges 5.7->34 m/s \u2014 SHOWING that divergence in the viewport is the money demo), data/keystone.png + ghost_paths.png (the static version of what this task animates). FIREWALL: not an issue here \u2014 rollouts are model output, thermal heatmap background is truth-for-human-eyes only (t13 precedent). NOT IN SCOPE: the three judge-hardening items on keystone.py (rollout_starts slice fix, split assert, predict_delta helper) \u2014 t3's first commit owns those; coordinate via land.py if both sessions touch keystone.py. Torch note: run everything with the shared primary .venv (worktrees have none)."
     }
   ]
