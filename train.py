@@ -324,7 +324,7 @@ def train_model(
             opt.zero_grad()
             loss.backward()  # type: ignore[no-untyped-call]  # torch stubs omit Tensor.backward
             opt.step()
-            total += float(loss) * len(b)
+            total += float(loss.detach()) * len(b)
             count += len(b)
         model.eval()
         with torch.no_grad():
@@ -372,7 +372,7 @@ def lr_find(
         opt.zero_grad()
         loss.backward()  # type: ignore[no-untyped-call]  # torch stubs omit Tensor.backward
         opt.step()
-        losses[i] = float(loss)
+        losses[i] = float(loss.detach())
     return lrs, losses
 
 

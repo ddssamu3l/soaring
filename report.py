@@ -40,6 +40,31 @@ def plot_lr_finder(lrs: FloatArr, losses: FloatArr, chosen: float, out: Path) ->
     plt.close(fig)
 
 
+def plot_onestep_card(channels: list[str], series: dict[str, FloatArr], out: Path) -> None:
+    """Grouped bars, one cluster per channel: the do-nothing baseline vs each model.
+
+    HOW TO READ IT: log scale, so every visible step DOWN from the persistence bar
+    is a multiple of skill on that channel. A model bar at persistence height =
+    that channel learned nothing. The gap between full and twin bars = what
+    feeling the air is worth there.
+    """
+    x = np.arange(len(channels), dtype=np.float64)
+    width = 0.8 / len(series)
+    fig, ax = plt.subplots(figsize=(9.5, 4.8))
+    for i, (name, vals) in enumerate(series.items()):
+        ax.bar(x + (i + 0.5) * width - 0.4, vals, width, label=name)
+    ax.set_yscale("log")
+    ax.set_xticks(x)
+    ax.set_xticklabels(channels, rotation=30, ha="right")
+    ax.set_ylabel("one-step RMSE, physical units (log scale)")
+    ax.set_title("one-step report card: lower = better, persistence = learned nothing")
+    ax.grid(alpha=0.3, axis="y")
+    ax.legend()
+    fig.tight_layout()
+    fig.savefig(out, dpi=110)
+    plt.close(fig)
+
+
 def plot_loss_curves(curves: dict[str, tuple[list[float], list[float]]], out: Path) -> None:
     """Train (solid) vs val (dashed) MSE per epoch, one color per model.
 

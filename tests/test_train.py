@@ -144,6 +144,9 @@ def test_training_learns_and_keeps_the_best_val_weights(data: Panels) -> None:
     x, y = tensor_pairs(data, idx, stats, spec)
     cfg = TrainConfig(hidden=(32,), batch=64, epochs=20, seed=0)
     model, hist = train_model(x, y, x, y, cfg, verbose=False)  # train==val: mechanics test
+    # history must hold plain floats -- a Tensor here would drag its whole autograd
+    # graph into the lists (memory leak) and break plotting/serialization
+    assert all(type(v) is float for v in hist.train_loss + hist.val_loss)
     assert hist.val_loss[-1] < 0.7
     assert hist.val_loss[-1] < hist.val_loss[0]
     with torch.no_grad():
