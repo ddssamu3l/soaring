@@ -1,7 +1,10 @@
-# soaring — minimal glider-in-a-thermal sim
+# soaring — a glider-in-a-thermal world-model testbed
 
-Pure Python + NumPy, **no ML**. This is the little "world" whose future a JEPA
-will later try to predict. Build intuition for it now; predict it later.
+A minimal glider sim (pure Python + NumPy) **plus the first predictor trained
+on it** (a small PyTorch MLP). The long game: JEPA-style world models —
+predict the world's future, then plan through the prediction. The sim is the
+little "world"; the experiments below measure whether its future can be
+trusted.
 
 ![two gliders holding a constant bank: green circles a thermal core and climbs, blue circles in dead air and sinks](soaring_first_flight.png)
 
@@ -11,12 +14,21 @@ will later try to predict. Build intuition for it now; predict it later.
   one tick later. Read it top to bottom; it's ~one screen of real code.
 - `fly.py` — flies a dumb constant-bank policy (two gliders: one on the
   thermal core, one out in dead air) and saves a plot.
+- `data_gen.py` — the sim as a data factory: logs random-policy flights into
+  a self-describing `data/dataset.npz` (channel names stored in-file).
+- `train.py` — trains the one-step panel predictor + a "blindfolded twin"
+  with the lift senses zeroed (the ablation that shows what feeling the air
+  is worth).
+- `card.py` — the one-step report card: per-channel error vs a dumb baseline.
+- `keystone.py` — THE experiment: free-running rollout error vs horizon.
+- `report.py` — all the charting behind the above.
 
 ## setup (one time, uses `uv`)
 ```
-uv venv .venv --python 3.12
-uv pip install --python .venv/bin/python numpy matplotlib pygame
+uv sync
 ```
+Creates `.venv` and installs everything from the lockfile (numpy, matplotlib,
+pygame, torch, plus the dev tools the commit gate runs).
 
 ## run
 ```
@@ -58,9 +70,46 @@ dream to its full 15 s horizon (the IMAGINED panel's `t+` counter shows how
 deep you are). Watch the blindfolded twin's VARIO drift from reality while
 the full model's needle stays honest — the keystone plot, animated.
 
+## the experiments — train it, grade it, THE keystone
+Repeatable infrastructure, not one-offs: each script rebuilds its results
+from `data/dataset.npz` and the saved checkpoints, prints a summary, and
+drops charts into `data/` (open the `.png`s to view). Run in this order:
+
+```
+.venv/bin/python data_gen.py     # 1. build data/dataset.npz  (once, or after sim changes)
+.venv/bin/python train.py        # 2. train predictor + blind twin -> data/model_*.pt
+.venv/bin/python card.py         # 3. one-step report card
+.venv/bin/python keystone.py     # 4. THE plot: free-running error vs horizon
+```
+
+What each shows — and the honesty checks built into it:
+
+- **`train.py`** prints a step-0 tripwire first: the untrained loss must be
+  ~1.0 (targets are z-scored), known before training starts — any other
+  number means the pipeline is broken. Saves `data/model_full.pt` +
+  `data/model_twin.pt`; charts `data/lr_finder.png` (evidence for the chosen
+  learning rate) and `data/loss_curves.png` (train/val vs the
+  predict-the-mean line at 1.0).
+- **`card.py`** grades one-step predictions on held-out episodes, per channel,
+  in physical units. Every number ships with its two lie detectors:
+  the **persistence baseline** ("predict nothing changes" — the model must
+  beat it, and the ratio is the real score) and the **spread ratio**
+  (predicted-change spread / true spread — near 0 means the model collapsed
+  to predicting the average and the printout flags it). Chart:
+  `data/onestep_card.png`.
+- **`keystone.py`** is the go/no-go experiment: 180 rollouts on held-out
+  episodes where the model eats **its own predictions** for 150 steps (15 s),
+  actions replayed from the log. `data/keystone.png` plots error vs horizon
+  against two references — persistence (must grow, or the experiment is
+  broken) and teacher-forced (the floor; the gap above it is pure error
+  compounding). **Flat curve ⇒ you can plan through the model; a cliff ⇒
+  react-only.** `data/ghost_paths.png` overlays imagined vs true flight
+  paths on the lift field, and `data/rollouts.npz` saves every rollout —
+  which is what the viewport's ghost-compare (above) replays.
+
 ## quick menu
 ```
-python3 scripts/menu.py
+python3 cli/menu.py
 ```
 prints every CLI, the automatic hooks, and the
 escape hatches at a glance — the fastest way to see what you can run.
@@ -75,7 +124,12 @@ Open `fly.py` and change the lines tagged `# <-- TRY`, then re-run:
 Open `glider_sim.py` and poke the physics in `step()` and `sink_rate()`.
 Anything unclear: ask Claude about the exact line.
 
-## next (stage 4, later)
-Log a pile of `(state, action, next_state)` from this sim → train a tiny
-predictor → plot free-running vs teacher-forced error vs horizon (the
-keystone). That predictor is the first JEPA. Not yet — get comfy here first.
+## where this stands (the keystone verdict)
+The rung-1 result is in: **flat**. Free-running position error grows roughly
+linearly to ~15 m at 15 s while persistence drifts to ~350 m; vario error
+stays flat where persistence is ~8× worse. And the blindfolded twin's
+imagined vario diverges open-loop — feeling the air is what keeps
+imagination sane. (Caveat that keeps us honest: this is on a *fixed* lift
+field the model could memorize — it proves the predict→imagine loop works,
+not that the model reads air.) Next: a planner that chooses actions by
+imagining futures through this model.
