@@ -46,7 +46,7 @@ import numpy.typing as npt
 
 from data_gen import MAX_BANK_CMD, make_world
 from glider_sim import G, Glider, GliderState, Simulation
-from train import Checkpoint, FloatArr, IntArr, load_checkpoint, predict_delta
+from train import Checkpoint, FloatArr, IntArr, clamp_panel, load_checkpoint, predict_delta
 
 BoolArr = npt.NDArray[np.bool_]
 
@@ -127,7 +127,10 @@ def imagine(ck: Checkpoint, panel0: FloatArr, bank_ticks: FloatArr, pitch_cmd: f
     action[:, pitch_col] = pitch_cmd
     for h in range(1, horizon + 1):
         action[:, bank_col] = bank_ticks[:, h - 1]
-        panel = panel + predict_delta(ck, panel, action)  # the imagination step
+        # the imagination step, pinned to the training range (clamp_panel).
+        # Load-bearing here: CEM would otherwise actively SEEK divergent
+        # dreams -- an imagined z running away to +1e9 scores deficit 0.
+        panel = clamp_panel(panel + predict_delta(ck, panel, action), ck.stats)
         out[:, h] = panel
     return out
 

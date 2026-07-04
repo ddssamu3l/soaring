@@ -31,6 +31,7 @@ from planner import (
 from train import (
     Checkpoint,
     PanelMLP,
+    clamp_panel,
     fit_stats,
     load_panels,
     make_feature_spec,
@@ -120,7 +121,7 @@ def test_imagine_batch_equals_a_per_candidate_loop(setup) -> None:
             action = np.empty((1, 2))
             action[:, bank_col] = bank_ticks[j, h]
             action[:, pitch_col] = pitch
-            panel = panel + predict_delta(ck, panel, action)
+            panel = clamp_panel(panel + predict_delta(ck, panel, action), ck.stats)
             assert np.allclose(got[j, h + 1], panel[0], rtol=1e-6, atol=1e-7)
 
 
@@ -146,8 +147,12 @@ def test_imagine_zero_net_drifts_by_the_mean_delta(setup) -> None:
     panel0 = data.sensors[5]
     bank_ticks = np.linspace(-0.5, 0.5, 4 * 8).reshape(4, 8)  # actions vary, output must not
     got = imagine(zck, panel0, bank_ticks, 24.0)
-    for h in (0, 3, 8):
-        assert np.allclose(got[:, h], panel0 + h * ck.stats.delta_mean, atol=1e-9)
+    expected = panel0.astype(np.float64)
+    assert np.allclose(got[:, 0], expected, atol=1e-9)
+    for h in range(1, 9):
+        expected = clamp_panel(expected[None] + ck.stats.delta_mean, ck.stats)[0]
+        if h in (3, 8):
+            assert np.allclose(got[:, h], expected, atol=1e-9)
 
 
 # --- the cost --------------------------------------------------------------------------

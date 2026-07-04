@@ -44,6 +44,7 @@ from train import (
     FloatArr,
     IntArr,
     Panels,
+    clamp_panel,
     load_checkpoint,
     load_panels,
     predict_delta,
@@ -114,7 +115,9 @@ def free_run(ck: Checkpoint, data: Panels, starts: IntArr, horizon: int) -> Floa
     out[:, 0] = panel
     for h in range(1, horizon + 1):
         action = data.actions[starts + h - 1]  # the command driving step h-1 -> h
-        panel = panel + predict_delta(ck, panel, action)  # the imagination step
+        # the imagination step, pinned to the training range: feedback drift
+        # past what the world ever produced is debris, not state (clamp_panel)
+        panel = clamp_panel(panel + predict_delta(ck, panel, action), ck.stats)
         out[:, h] = panel
     return out
 
@@ -207,6 +210,14 @@ def main() -> None:
         "persistence": persistence_run(data, starts, HORIZON),
         "teacher-forced": teacher_forced(full, data, starts, HORIZON),
     }
+
+    # transparency: how often did the stability clamp actually engage? A high
+    # number would mean the curve below is more clamp than model.
+    for name in ("full", "twin"):
+        r = runs[name]
+        touched = (r <= full.stats.panel_lo) | (r >= full.stats.panel_hi)
+        frac = float(touched.any(axis=(1, 2)).mean())
+        print(f"clamp engaged in {frac:.1%} of {name} rollouts")
 
     names = full.sensor_names
     xc, yc, vc = names.index("x"), names.index("y"), names.index("vario")

@@ -140,13 +140,18 @@ class Stats:
     action_std: FloatArr  # (2,)
     delta_mean: FloatArr  # (9,)
     delta_std: FloatArr  # (9,)
+    panel_lo: FloatArr  # (9,) train-range floor -- the imagination clamp (clamp_panel)
+    panel_hi: FloatArr  # (9,) train-range ceiling
 
 
 def fit_stats(data: Panels, train_pairs: IntArr) -> Stats:
-    """Means/stds over the train pairs; stds floored so a dead channel can't div-by-0."""
+    """Means/stds over the train pairs; stds floored so a dead channel can't div-by-0.
+    Also the per-channel train RANGE (both pair endpoints), which bounds what the
+    model has ever been graded on -- imagination is clamped to it (clamp_panel)."""
     panel = data.sensors[train_pairs]
+    next_panel = data.sensors[train_pairs + 1]
     action = data.actions[train_pairs]
-    delta = data.sensors[train_pairs + 1] - panel
+    delta = next_panel - panel
     floor = 1e-8
     return Stats(
         panel_mean=panel.mean(axis=0),
@@ -155,6 +160,8 @@ def fit_stats(data: Panels, train_pairs: IntArr) -> Stats:
         action_std=np.maximum(action.std(axis=0), floor),
         delta_mean=delta.mean(axis=0),
         delta_std=np.maximum(delta.std(axis=0), floor),
+        panel_lo=np.minimum(panel.min(axis=0), next_panel.min(axis=0)),
+        panel_hi=np.maximum(panel.max(axis=0), next_panel.max(axis=0)),
     )
 
 
@@ -224,6 +231,23 @@ def undo_delta(z_delta: FloatArr, panel: FloatArr, stats: Stats) -> FloatArr:
     """Model output back to a physical panel: panel + de-normalized delta.
     This single line is the imagination step keystone.py loops 150 times."""
     return panel + z_delta * stats.delta_std + stats.delta_mean
+
+
+def clamp_panel(panel: FloatArr, stats: Stats) -> FloatArr:
+    """Pin an IMAGINED panel to the training data's per-channel range.
+
+    Free-running feedback can drift a panel off the training manifold, where
+    the MLP extrapolates arbitrarily -- on the t3 world ~1% of keystone
+    rollouts ran away to 1e9 through exactly this loop (vario error -> wilder
+    input -> wilder output). Physically: no instrument can read outside its
+    gauge, so values beyond anything the world ever produced are not states,
+    they're numerical debris. Applied ONLY where predictions are fed back
+    (keystone free-run, planner imagination) -- never to real sensor data and
+    never during training. It is a stability crutch and is reported when it
+    engages; the principled cure (multi-step rollout training loss) is logged
+    for rung 2.
+    """
+    return np.clip(panel, stats.panel_lo, stats.panel_hi)
 
 
 # --- the model -------------------------------------------------------------------------
@@ -392,7 +416,16 @@ class Checkpoint:
     dt: float
 
 
-_STATS = ("panel_mean", "panel_std", "action_mean", "action_std", "delta_mean", "delta_std")
+_STATS = (
+    "panel_mean",
+    "panel_std",
+    "action_mean",
+    "action_std",
+    "delta_mean",
+    "delta_std",
+    "panel_lo",
+    "panel_hi",
+)
 
 
 def save_checkpoint(
@@ -432,6 +465,8 @@ def load_checkpoint(path: Path) -> Checkpoint:
         action_std=st["action_std"],
         delta_mean=st["delta_mean"],
         delta_std=st["delta_std"],
+        panel_lo=st["panel_lo"],
+        panel_hi=st["panel_hi"],
     )
     sp = {k: np.asarray(raw["split"][k].numpy(), dtype=np.int64) for k in ("train", "val", "test")}
     split = Split(train=sp["train"], val=sp["val"], test=sp["test"])

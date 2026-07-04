@@ -21,6 +21,7 @@ from train import (
     PanelMLP,
     Panels,
     TrainConfig,
+    clamp_panel,
     delta_targets,
     featurize,
     fit_stats,
@@ -115,6 +116,32 @@ def test_delta_targets_roundtrip_exactly_to_the_next_panel(data: Panels) -> None
     # z-scored on the same rows the stats were fitted on => standardized by construction
     assert np.allclose(z.mean(axis=0), 0.0, atol=1e-8)
     assert np.allclose(z.std(axis=0), 1.0, atol=1e-6)
+
+
+def test_fit_stats_range_covers_exactly_the_train_pairs(data: Panels) -> None:
+    """panel_lo/panel_hi are the imagination clamp: they must be the true
+    per-channel extremes over BOTH pair endpoints -- every training row inside,
+    and the bounds attained (not padded)."""
+    idx, stats, _ = _fitted(data)
+    rows = np.concatenate([data.sensors[idx], data.sensors[idx + 1]])
+    assert np.all(rows >= stats.panel_lo) and np.all(rows <= stats.panel_hi)
+    assert np.array_equal(stats.panel_lo, rows.min(axis=0))
+    assert np.array_equal(stats.panel_hi, rows.max(axis=0))
+
+
+def test_clamp_panel_pins_only_out_of_range_values(data: Panels) -> None:
+    """In-range panels pass through untouched (the clamp must be inert on the
+    manifold); runaway values pin to the gauge limits."""
+    idx, stats, _ = _fitted(data)
+    real = data.sensors[idx[:50]]
+    assert np.array_equal(clamp_panel(real, stats), real)  # inert on real data
+    wild = real.copy()
+    wild[:, 0] = 1e9
+    wild[:, 6] = -1e9
+    pinned = clamp_panel(wild, stats)
+    assert np.all(pinned[:, 0] == stats.panel_hi[0])
+    assert np.all(pinned[:, 6] == stats.panel_lo[6])
+    assert np.array_equal(pinned[:, 1:6], wild[:, 1:6])  # untouched channels unchanged
 
 
 # --- model -------------------------------------------------------------------------
@@ -240,5 +267,6 @@ def test_checkpoint_roundtrip_reproduces_predictions(tmp_path, data: Panels) -> 
     assert ck.sensor_names == data.sensor_names
     assert np.array_equal(ck.split.test, split.test)
     assert np.allclose(ck.stats.delta_std, stats.delta_std)
+    assert np.array_equal(ck.stats.panel_lo, stats.panel_lo)  # the clamp travels too
     with torch.no_grad():
         assert torch.equal(ck.model(x), model(x))  # identical weights => identical output

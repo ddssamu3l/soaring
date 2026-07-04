@@ -33,6 +33,7 @@ from train import (
     PanelMLP,
     Panels,
     Split,
+    clamp_panel,
     fit_stats,
     load_panels,
     make_feature_spec,
@@ -123,15 +124,19 @@ def test_true_panels_are_the_actual_rows(setup) -> None:
 
 
 def test_zero_net_free_run_matches_closed_form(setup) -> None:
-    """A zero net outputs z-delta = 0, i.e. 'the mean delta, every step'. Its
-    imagined panel therefore has the exact closed form panel0 + h*delta_mean.
-    This pins the whole recursion: featurize -> model -> undo_delta -> feed back."""
+    """A zero net outputs z-delta = 0, i.e. 'the mean delta, every step', and
+    the feedback loop clamps each result to the training range -- so the exact
+    closed form is the clamp iterated: e_h = clamp(e_{h-1} + delta_mean).
+    This pins the whole recursion: featurize -> model -> undo_delta -> clamp."""
     ck, data = setup
     starts = rollout_starts(data, ck.split.test, H, STRIDE)
     run = free_run(ck, data, starts, H)
-    for h in (0, 1, H // 2, H):
-        expected = data.sensors[starts] + h * ck.stats.delta_mean
-        assert np.allclose(run[:, h], expected, atol=1e-9)
+    expected = data.sensors[starts].astype(np.float64)
+    assert np.allclose(run[:, 0], expected, atol=1e-9)
+    for h in range(1, H + 1):
+        expected = clamp_panel(expected + ck.stats.delta_mean, ck.stats)
+        if h in (1, H // 2, H):
+            assert np.allclose(run[:, h], expected, atol=1e-9)
 
 
 def test_zero_net_teacher_forced_matches_closed_form(setup) -> None:
@@ -147,12 +152,13 @@ def test_zero_net_teacher_forced_matches_closed_form(setup) -> None:
 
 def test_free_and_teacher_forced_agree_at_horizon_one(setup) -> None:
     """At h=1 both start from the true panel, so they MUST coincide exactly --
-    a cheap consistency proof that the two loops share one prediction step."""
+    a cheap consistency proof that the two loops share one prediction step
+    (free-run additionally clamps -- teacher-forced never feeds back, so it
+    never needs to)."""
     ck, data = setup
     starts = rollout_starts(data, ck.split.test, H, STRIDE)
-    assert np.allclose(
-        free_run(ck, data, starts, 1)[:, 1], teacher_forced(ck, data, starts, 1)[:, 1]
-    )
+    tf = teacher_forced(ck, data, starts, 1)[:, 1]
+    assert np.allclose(free_run(ck, data, starts, 1)[:, 1], clamp_panel(tf, ck.stats))
 
 
 def test_persistence_is_frozen(setup) -> None:
