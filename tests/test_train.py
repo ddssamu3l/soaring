@@ -17,6 +17,7 @@ from torch.nn import functional as F
 
 from data_gen import generate_dataset
 from train import (
+    Checkpoint,
     PanelMLP,
     Panels,
     TrainConfig,
@@ -29,6 +30,7 @@ from train import (
     make_feature_spec,
     pair_indices,
     param_count,
+    predict_delta,
     save_checkpoint,
     split_episodes,
     tensor_pairs,
@@ -161,6 +163,65 @@ def test_lr_finder_runs_and_starts_near_one(data: Panels) -> None:
     assert len(lrs) == len(losses) == 20
     assert 0.5 < losses[0] < 2.0  # the first step is still basically untrained
     assert np.all(np.isfinite(losses[:5]))  # sane in the safe zone (MAY explode later)
+
+
+# --- predict_delta: THE shared model call --------------------------------------------
+def _checkpoint_around(model: PanelMLP, data: Panels, ablate: bool = False) -> Checkpoint:
+    idx, stats, spec = _fitted(data)
+    model.eval()
+    return Checkpoint(
+        model=model,
+        stats=stats,
+        spec=spec,
+        split=split_episodes(data.episode),
+        ablate=ablate,
+        sensor_names=data.sensor_names,
+        action_names=data.action_names,
+        dt=data.dt,
+    )
+
+
+def test_predict_delta_matches_the_pipeline_it_replaced(data: Panels) -> None:
+    """predict_delta must equal the hand-inlined featurize -> net -> de-normalize
+    it deduplicated (card.py / keystone.py / the planner all lean on this one call),
+    and `panel + delta` must agree with undo_delta -- the imagination-step identity."""
+    idx, stats, spec = _fitted(data)
+    torch.manual_seed(0)
+    ck = _checkpoint_around(PanelMLP(spec.n_features, len(data.sensor_names), (16,)), data)
+    panel, action = data.sensors[idx], data.actions[idx]
+    delta = predict_delta(ck, panel, action)
+    x = torch.from_numpy(featurize(panel, action, stats, spec).astype(np.float32))
+    with torch.no_grad():
+        z = np.asarray(ck.model(x).numpy(), dtype=np.float64)
+    assert np.array_equal(delta, z * stats.delta_std + stats.delta_mean)  # same ops, bit-for-bit
+    assert np.allclose(panel + delta, undo_delta(z, panel, stats), atol=1e-9)
+
+
+def test_predict_delta_zero_net_returns_the_mean_delta(data: Panels) -> None:
+    """Closed form: a zero net outputs z-delta 0, so the physical delta is exactly
+    the train-mean delta for every row -- pinned before any planner trusts it."""
+    _, stats, spec = _fitted(data)
+    zero = PanelMLP(spec.n_features, len(data.sensor_names), (8,))
+    with torch.no_grad():
+        for p in zero.parameters():
+            p.zero_()
+    ck = _checkpoint_around(zero, data)
+    delta = predict_delta(ck, data.sensors[:50], data.actions[:50])
+    assert np.array_equal(delta, np.broadcast_to(stats.delta_mean, delta.shape))
+
+
+def test_predict_delta_honors_the_checkpoints_own_ablate_flag(data: Panels) -> None:
+    """The twin's blindfold travels INSIDE its checkpoint: the same net predicts
+    differently once ablate=True, with no caller-side flag to forget."""
+    idx, _, spec = _fitted(data)
+    torch.manual_seed(0)
+    net = PanelMLP(spec.n_features, len(data.sensor_names), (16,))
+    seeing = _checkpoint_around(net, data, ablate=False)
+    blind = _checkpoint_around(net, data, ablate=True)
+    panel, action = data.sensors[idx], data.actions[idx]
+    assert not np.array_equal(
+        predict_delta(seeing, panel, action), predict_delta(blind, panel, action)
+    )
 
 
 # --- checkpoints ---------------------------------------------------------------------

@@ -450,6 +450,21 @@ def load_checkpoint(path: Path) -> Checkpoint:
     )
 
 
+def predict_delta(ck: Checkpoint, panel: FloatArr, action: FloatArr) -> FloatArr:
+    """(B, 9) panel + (B, 2) action -> (B, 9) predicted panel CHANGE, physical units.
+
+    THE model call -- featurize -> net -> de-normalize, in one place. One-step
+    prediction is `panel + predict_delta(...)`; imagination is that same line fed
+    back into itself. card.py grades this call, keystone.py loops it, and the
+    planner scores candidate futures through it -- one code path, one behavior.
+    """
+    x = torch.from_numpy(featurize(panel, action, ck.stats, ck.spec, ck.ablate).astype(np.float32))
+    with torch.no_grad():
+        z = np.asarray(ck.model(x).numpy(), dtype=np.float64)
+    out: FloatArr = z * ck.stats.delta_std + ck.stats.delta_mean
+    return out
+
+
 # --- the run: tripwire -> lr finder -> train full + twin -> curves + checkpoints -----------
 def main() -> None:
     here = Path(__file__).resolve().parent
