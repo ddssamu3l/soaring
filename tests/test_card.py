@@ -21,6 +21,7 @@ from train import (
     load_panels,
     make_feature_spec,
     pair_indices,
+    predict_delta,
     save_checkpoint,
     split_episodes,
     tensor_pairs,
@@ -66,6 +67,19 @@ def test_persistence_rmse_matches_hand_computation(setup) -> None:
     true_delta = data.sensors[rows + 1] - data.sensors[rows]
     assert np.allclose(card.persist_rmse, np.sqrt(np.mean(true_delta**2, axis=0)))
     assert card.n_pairs == len(rows)
+
+
+def test_card_grades_exactly_the_shared_model_call(setup) -> None:
+    """The card's model column must be a pure function of train.predict_delta --
+    the same call keystone.py loops and the planner searches through. Pinning the
+    identity here keeps 'one-step skill' meaning ONE thing across the project."""
+    ck, data = setup
+    rows = held_out_pair_rows(ck, data)
+    err = predict_delta(ck, data.sensors[rows], data.actions[rows]) - (
+        data.sensors[rows + 1] - data.sensors[rows]
+    )
+    card = one_step_card(ck, data)
+    assert np.allclose(card.model_rmse, np.sqrt(np.mean(err**2, axis=0)))
 
 
 def test_card_shapes_and_sanity(setup) -> None:

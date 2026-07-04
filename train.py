@@ -44,7 +44,7 @@ advance what healthy looks like):
 Run:  .venv/bin/python train.py    (needs data/dataset.npz; rebuild via data_gen.py)
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -140,13 +140,18 @@ class Stats:
     action_std: FloatArr  # (2,)
     delta_mean: FloatArr  # (9,)
     delta_std: FloatArr  # (9,)
+    panel_lo: FloatArr  # (9,) train-range floor -- the imagination clamp (clamp_panel)
+    panel_hi: FloatArr  # (9,) train-range ceiling
 
 
 def fit_stats(data: Panels, train_pairs: IntArr) -> Stats:
-    """Means/stds over the train pairs; stds floored so a dead channel can't div-by-0."""
+    """Means/stds over the train pairs; stds floored so a dead channel can't div-by-0.
+    Also the per-channel train RANGE (both pair endpoints), which bounds what the
+    model has ever been graded on -- imagination is clamped to it (clamp_panel)."""
     panel = data.sensors[train_pairs]
+    next_panel = data.sensors[train_pairs + 1]
     action = data.actions[train_pairs]
-    delta = data.sensors[train_pairs + 1] - panel
+    delta = next_panel - panel
     floor = 1e-8
     return Stats(
         panel_mean=panel.mean(axis=0),
@@ -155,6 +160,8 @@ def fit_stats(data: Panels, train_pairs: IntArr) -> Stats:
         action_std=np.maximum(action.std(axis=0), floor),
         delta_mean=delta.mean(axis=0),
         delta_std=np.maximum(delta.std(axis=0), floor),
+        panel_lo=np.minimum(panel.min(axis=0), next_panel.min(axis=0)),
+        panel_hi=np.maximum(panel.max(axis=0), next_panel.max(axis=0)),
     )
 
 
@@ -224,6 +231,23 @@ def undo_delta(z_delta: FloatArr, panel: FloatArr, stats: Stats) -> FloatArr:
     """Model output back to a physical panel: panel + de-normalized delta.
     This single line is the imagination step keystone.py loops 150 times."""
     return panel + z_delta * stats.delta_std + stats.delta_mean
+
+
+def clamp_panel(panel: FloatArr, stats: Stats) -> FloatArr:
+    """Pin an IMAGINED panel to the training data's per-channel range.
+
+    Free-running feedback can drift a panel off the training manifold, where
+    the MLP extrapolates arbitrarily -- on the t3 world ~1% of keystone
+    rollouts ran away to 1e9 through exactly this loop (vario error -> wilder
+    input -> wilder output). Physically: no instrument can read outside its
+    gauge, so values beyond anything the world ever produced are not states,
+    they're numerical debris. Applied ONLY where predictions are fed back
+    (keystone free-run, planner imagination) -- never to real sensor data and
+    never during training. It is a stability crutch and is reported when it
+    engages; the principled cure (multi-step rollout training loss) is logged
+    for rung 2.
+    """
+    return np.clip(panel, stats.panel_lo, stats.panel_hi)
 
 
 # --- the model -------------------------------------------------------------------------
@@ -392,7 +416,16 @@ class Checkpoint:
     dt: float
 
 
-_STATS = ("panel_mean", "panel_std", "action_mean", "action_std", "delta_mean", "delta_std")
+_STATS = (
+    "panel_mean",
+    "panel_std",
+    "action_mean",
+    "action_std",
+    "delta_mean",
+    "delta_std",
+    "panel_lo",
+    "panel_hi",
+)
 
 
 def save_checkpoint(
@@ -432,6 +465,8 @@ def load_checkpoint(path: Path) -> Checkpoint:
         action_std=st["action_std"],
         delta_mean=st["delta_mean"],
         delta_std=st["delta_std"],
+        panel_lo=st["panel_lo"],
+        panel_hi=st["panel_hi"],
     )
     sp = {k: np.asarray(raw["split"][k].numpy(), dtype=np.int64) for k in ("train", "val", "test")}
     split = Split(train=sp["train"], val=sp["val"], test=sp["test"])
@@ -448,6 +483,21 @@ def load_checkpoint(path: Path) -> Checkpoint:
         action_names=action_names,
         dt=float(raw["dt"]),
     )
+
+
+def predict_delta(ck: Checkpoint, panel: FloatArr, action: FloatArr) -> FloatArr:
+    """(B, 9) panel + (B, 2) action -> (B, 9) predicted panel CHANGE, physical units.
+
+    THE model call -- featurize -> net -> de-normalize, in one place. One-step
+    prediction is `panel + predict_delta(...)`; imagination is that same line fed
+    back into itself. card.py grades this call, keystone.py loops it, and the
+    planner scores candidate futures through it -- one code path, one behavior.
+    """
+    x = torch.from_numpy(featurize(panel, action, ck.stats, ck.spec, ck.ablate).astype(np.float32))
+    with torch.no_grad():
+        z = np.asarray(ck.model(x).numpy(), dtype=np.float64)
+    out: FloatArr = z * ck.stats.delta_std + ck.stats.delta_mean
+    return out
 
 
 # --- the run: tripwire -> lr finder -> train full + twin -> curves + checkpoints -----------
@@ -486,12 +536,20 @@ def main() -> None:
 
     # Train the full model and the blindfolded twin IDENTICALLY -- same data rows,
     # same seed, same schedule; the only difference is the zeroed lift columns.
+    # The full model is an ENSEMBLE of ENSEMBLE_SIZE members (seeds 0,1,2 --
+    # same data, different init + shuffle): one net cannot say "I don't know",
+    # but three independently-trained nets DISAGREE exactly where imagination
+    # leaves the training manifold, and the planner ranks candidates by their
+    # WORST member (t3 finding: a single net dreamed a +3.4 m/s thermal in
+    # dead off-corridor air and the planner flew into it). model_full.pt is
+    # member 0 -- keystone/card grade THE model; the extras are planner fuel.
     curves: dict[str, tuple[list[float], list[float]]] = {}
-    for name, ablate in (("full", False), ("twin", True)):
+    jobs = [("full", False, 0), ("full_s1", False, 1), ("full_s2", False, 2), ("twin", True, 0)]
+    for name, ablate, seed in jobs:
         print(f"\ntraining the {name} model {'(lift senses zeroed)' if ablate else ''}...")
         xt, yt = tensor_pairs(data, role_pairs["train"], stats, spec, ablate)
         xv, yv = tensor_pairs(data, role_pairs["val"], stats, spec, ablate)
-        model, hist = train_model(xt, yt, xv, yv, cfg)
+        model, hist = train_model(xt, yt, xv, yv, replace(cfg, seed=seed))
         save_checkpoint(here / "data" / f"model_{name}.pt", model, cfg, stats, split, data, ablate)
         curves[name] = (hist.train_loss, hist.val_loss)
         print(f"  best val {min(hist.val_loss):.5f}  ->  data/model_{name}.pt")

@@ -36,7 +36,6 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-import torch
 
 import report
 from data_gen import make_world
@@ -45,10 +44,10 @@ from train import (
     FloatArr,
     IntArr,
     Panels,
-    featurize,
+    clamp_panel,
     load_checkpoint,
     load_panels,
-    undo_delta,
+    predict_delta,
 )
 
 HORIZON = 150  # 15 s at dt=0.1 -- generous vs the 2-10 s a planner needs
@@ -67,8 +66,35 @@ def rollout_starts(data: Panels, test_eps: IntArr, horizon: int, stride: int) ->
     starts: list[int] = []
     for ep in test_eps:
         rows = np.nonzero(data.episode == ep)[0]
-        starts.extend(rows[: len(rows) - horizon : stride])
+        # clamp at 0: a NEGATIVE stop would wrap the slice around and emit
+        # starts with no full horizon ahead (episodes shorter than `horizon`
+        # must contribute zero starts, not garbage ones)
+        stop = max(len(rows) - horizon, 0)
+        starts.extend(rows[:stop:stride])
     return np.asarray(starts, dtype=np.int64)
+
+
+def plot_bounds(
+    truth: FloatArr, xc: int, yc: int, margin: float = 100.0
+) -> tuple[float, float, float, float]:
+    """(xlo, xhi, ylo, yhi) covering every true flight path plus a margin --
+    the ghost chart's field grid follows the DATA, not a hardcoded arena size
+    (the t1 world fit in +/-250 m; the t3 decision corridor does not)."""
+    return (
+        float(truth[:, :, xc].min() - margin),
+        float(truth[:, :, xc].max() + margin),
+        float(truth[:, :, yc].min() - margin),
+        float(truth[:, :, yc].max() + margin),
+    )
+
+
+def check_shared_test_split(full: Checkpoint, twin: Checkpoint) -> None:
+    """Refuse to compare checkpoints that hold different TEST episodes. If the
+    twin were ever retrained with another split seed, its 'held-out' rollouts
+    could include the full model's TRAINING flights -- a silent leak that would
+    flatter every curve on the plot. Hard stop, not a warning."""
+    if not np.array_equal(full.split.test, twin.split.test):
+        raise ValueError("full/twin checkpoints hold different test splits -- retrain the pair")
 
 
 def true_panels(data: Panels, starts: IntArr, horizon: int) -> FloatArr:
@@ -89,12 +115,9 @@ def free_run(ck: Checkpoint, data: Panels, starts: IntArr, horizon: int) -> Floa
     out[:, 0] = panel
     for h in range(1, horizon + 1):
         action = data.actions[starts + h - 1]  # the command driving step h-1 -> h
-        x = torch.from_numpy(
-            featurize(panel, action, ck.stats, ck.spec, ck.ablate).astype(np.float32)
-        )
-        with torch.no_grad():
-            z = np.asarray(ck.model(x).numpy(), dtype=np.float64)
-        panel = undo_delta(z, panel, ck.stats)  # the imagination step
+        # the imagination step, pinned to the training range: feedback drift
+        # past what the world ever produced is debris, not state (clamp_panel)
+        panel = clamp_panel(panel + predict_delta(ck, panel, action), ck.stats)
         out[:, h] = panel
     return out
 
@@ -108,12 +131,7 @@ def teacher_forced(ck: Checkpoint, data: Panels, starts: IntArr, horizon: int) -
     for h in range(1, horizon + 1):
         prev = data.sensors[starts + h - 1]
         action = data.actions[starts + h - 1]
-        x = torch.from_numpy(
-            featurize(prev, action, ck.stats, ck.spec, ck.ablate).astype(np.float32)
-        )
-        with torch.no_grad():
-            z = np.asarray(ck.model(x).numpy(), dtype=np.float64)
-        out[:, h] = undo_delta(z, prev, ck.stats)
+        out[:, h] = prev + predict_delta(ck, prev, action)
     return out
 
 
@@ -181,6 +199,7 @@ def main() -> None:
     data = load_panels(here / "data" / "dataset.npz")
     full = load_checkpoint(here / "data" / "model_full.pt")
     twin = load_checkpoint(here / "data" / "model_twin.pt")
+    check_shared_test_split(full, twin)  # twin graded on the SAME held-out flights
 
     starts = rollout_starts(data, full.split.test, HORIZON, STRIDE)
     truth = true_panels(data, starts, HORIZON)
@@ -191,6 +210,14 @@ def main() -> None:
         "persistence": persistence_run(data, starts, HORIZON),
         "teacher-forced": teacher_forced(full, data, starts, HORIZON),
     }
+
+    # transparency: how often did the stability clamp actually engage? A high
+    # number would mean the curve below is more clamp than model.
+    for name in ("full", "twin"):
+        r = runs[name]
+        touched = (r <= full.stats.panel_lo) | (r >= full.stats.panel_hi)
+        frac = float(touched.any(axis=(1, 2)).mean())
+        print(f"clamp engaged in {frac:.1%} of {name} rollouts")
 
     names = full.sensor_names
     xc, yc, vc = names.index("x"), names.index("y"), names.index("vario")
@@ -221,7 +248,8 @@ def main() -> None:
     # ghost paths: the keystone as a picture of flying (3 example rollouts).
     # Thermal truth for HUMAN EYES only -- the firewall forbids it as model input.
     _, air = make_world()
-    gx, gy = np.meshgrid(np.linspace(-250, 250, 200), np.linspace(-250, 250, 200))
+    xlo, xhi, ylo, yhi = plot_bounds(truth, xc, yc)
+    gx, gy = np.meshgrid(np.linspace(xlo, xhi, 200), np.linspace(ylo, yhi, 200))
     ghosts = []
     for i in np.linspace(0, len(starts) - 1, 3, dtype=int):
         ghosts.append(

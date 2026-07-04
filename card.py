@@ -25,7 +25,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
-import torch
 
 import report
 from train import (
@@ -33,10 +32,10 @@ from train import (
     FloatArr,
     IntArr,
     Panels,
-    featurize,
     load_checkpoint,
     load_panels,
     pair_indices,
+    predict_delta,
 )
 
 # display-only unit labels; unknown channel names simply print without a unit
@@ -80,15 +79,9 @@ def one_step_card(ck: Checkpoint, data: Panels) -> Card:
     card isolates raw prediction skill; compounding is keystone.py's question.
     """
     idx = held_out_pair_rows(ck, data)
-    x = torch.from_numpy(
-        featurize(data.sensors[idx], data.actions[idx], ck.stats, ck.spec, ck.ablate).astype(
-            np.float32
-        )
-    )
-    with torch.no_grad():
-        z_pred = np.asarray(ck.model(x).numpy(), dtype=np.float64)
-    # back to physical units: the card must speak meters and m/s, not z-scores
-    pred_delta = z_pred * ck.stats.delta_std + ck.stats.delta_mean
+    # physical units straight from THE shared model call (train.predict_delta):
+    # the card must speak meters and m/s, not z-scores
+    pred_delta = predict_delta(ck, data.sensors[idx], data.actions[idx])
     true_delta = data.sensors[idx + 1] - data.sensors[idx]
     err = pred_delta - true_delta
     return Card(

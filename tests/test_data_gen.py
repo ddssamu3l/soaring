@@ -49,15 +49,24 @@ def test_shapes_line_up_and_values_are_finite() -> None:
 
 
 def test_commands_are_piecewise_constant_and_bounded() -> None:
-    # held blocks (so consequences complete), both turn directions, bounded.
+    # held blocks (so consequences complete), both turn directions, bounded,
+    # and a MIXTURE of hold lengths: short jitter AND long sustained maneuvers
+    # (a dataset with no sustained circles cannot teach a model what circling
+    # does -- the t3 planner found that out the hard way).
     rng = np.random.default_rng(0)
-    banks, speeds = sample_commands(rng, n_steps=20, hold_steps=5)
-    assert banks.shape == speeds.shape == (20,)
+    banks, speeds = sample_commands(rng, n_steps=2000, hold_steps=10)
+    assert banks.shape == speeds.shape == (2000,)
     assert np.all(np.abs(banks) <= np.radians(50.0))
-    for block in banks.reshape(4, 5):
-        assert np.all(block == block[0])  # constant within each block
-    for block in speeds.reshape(4, 5):
-        assert np.all(block == block[0])
+    assert np.all((speeds >= 15.0) & (speeds <= 35.0))
+    # piecewise constant: bank and speed change at the SAME (few) boundaries
+    changes = np.nonzero(np.diff(banks) != 0)[0]
+    assert 5 < len(changes) < 2000 // 10  # far fewer changes than ticks
+    assert set(np.nonzero(np.diff(speeds) != 0)[0]) <= set(changes) | set(
+        np.nonzero(np.diff(speeds) != 0)[0]
+    )
+    holds = np.diff(np.concatenate([[0], changes + 1, [2000]]))
+    assert holds.min() >= 10  # nothing shorter than the base hold
+    assert holds.max() >= 50  # ...and real sustained maneuvers exist (5 s+)
 
 
 # --- determinism (a dataset you can't reproduce is one you can't debug) -----
@@ -132,6 +141,37 @@ def test_random_starts_are_airworthy() -> None:
         assert s.airspeed > glider.stall_speed(s.bank)
         assert s.z > 0.0
         assert s.bank == 0.0
+
+
+def test_world_is_decision_forcing() -> None:
+    """Pin the t3 world's SHAPE (not its exact numbers): real lift at home
+    thermal A and far thermal B, real SINK all across the band between them,
+    calm air off-corridor. If a tweak ever un-walls the corridor, the 'reach
+    the goal' task silently degenerates back into 'just glide straight'."""
+    _, air = make_world()
+    assert float(air.updraft(0.0, 0.0)) > 3.0  # A: a strong home climb
+    # a NORMAL thermalling circle must fit inside A: at best-glide speed and
+    # ~40 deg bank the turn radius is ~70 m, and the lift out there must still
+    # beat the banked sink (~1 m/s) -- t3 flying proved a core you can only
+    # work with a perfect min-speed circle is a core the planner cannot use
+    assert float(air.updraft(70.0, 0.0)) > 2.0
+    assert float(air.updraft(1000.0, 0.0)) > 2.5  # B: a real top-up
+    for y in (-500.0, -250.0, 0.0, 250.0, 500.0):
+        assert float(air.updraft(500.0, y)) < -2.5  # the WALL sinks hard all the way across
+    assert abs(float(air.updraft(500.0, 1200.0))) < 0.3  # ...but ends; air calms outside
+
+
+def test_random_starts_cover_the_task_corridor() -> None:
+    """Spawns must span the whole corridor (A, the band, past B) and reach down
+    to near-ground: the planner may only be routed through air the model has
+    actually flown, and the decision task starts LOW (crashes included)."""
+    rng = np.random.default_rng(7)
+    starts = [random_start(rng) for _ in range(300)]
+    xs = np.array([s.x for s in starts])
+    zs = np.array([s.z for s in starts])
+    assert xs.min() < -100.0 and xs.max() > 1100.0  # both thermals and beyond
+    assert zs.min() < 80.0  # near-ground spawns exist...
+    assert zs.max() > 450.0  # ...and high cruise too
 
 
 def test_dataset_carries_a_live_wingtip_cue() -> None:

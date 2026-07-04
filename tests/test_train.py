@@ -17,9 +17,11 @@ from torch.nn import functional as F
 
 from data_gen import generate_dataset
 from train import (
+    Checkpoint,
     PanelMLP,
     Panels,
     TrainConfig,
+    clamp_panel,
     delta_targets,
     featurize,
     fit_stats,
@@ -29,6 +31,7 @@ from train import (
     make_feature_spec,
     pair_indices,
     param_count,
+    predict_delta,
     save_checkpoint,
     split_episodes,
     tensor_pairs,
@@ -115,6 +118,32 @@ def test_delta_targets_roundtrip_exactly_to_the_next_panel(data: Panels) -> None
     assert np.allclose(z.std(axis=0), 1.0, atol=1e-6)
 
 
+def test_fit_stats_range_covers_exactly_the_train_pairs(data: Panels) -> None:
+    """panel_lo/panel_hi are the imagination clamp: they must be the true
+    per-channel extremes over BOTH pair endpoints -- every training row inside,
+    and the bounds attained (not padded)."""
+    idx, stats, _ = _fitted(data)
+    rows = np.concatenate([data.sensors[idx], data.sensors[idx + 1]])
+    assert np.all(rows >= stats.panel_lo) and np.all(rows <= stats.panel_hi)
+    assert np.array_equal(stats.panel_lo, rows.min(axis=0))
+    assert np.array_equal(stats.panel_hi, rows.max(axis=0))
+
+
+def test_clamp_panel_pins_only_out_of_range_values(data: Panels) -> None:
+    """In-range panels pass through untouched (the clamp must be inert on the
+    manifold); runaway values pin to the gauge limits."""
+    idx, stats, _ = _fitted(data)
+    real = data.sensors[idx[:50]]
+    assert np.array_equal(clamp_panel(real, stats), real)  # inert on real data
+    wild = real.copy()
+    wild[:, 0] = 1e9
+    wild[:, 6] = -1e9
+    pinned = clamp_panel(wild, stats)
+    assert np.all(pinned[:, 0] == stats.panel_hi[0])
+    assert np.all(pinned[:, 6] == stats.panel_lo[6])
+    assert np.array_equal(pinned[:, 1:6], wild[:, 1:6])  # untouched channels unchanged
+
+
 # --- model -------------------------------------------------------------------------
 def test_mlp_shape_and_param_count_match_the_design() -> None:
     torch.manual_seed(0)
@@ -154,6 +183,22 @@ def test_training_learns_and_keeps_the_best_val_weights(data: Panels) -> None:
     assert final == pytest.approx(min(hist.val_loss), abs=1e-6)  # best snapshot was kept
 
 
+def test_different_seeds_train_different_members(data: Panels) -> None:
+    """The ensemble's whole value is diversity: two members trained on the same
+    rows with different seeds must NOT be the same function -- if seeding ever
+    stopped reaching init/shuffle, worst-member voting would silently become
+    single-model planning."""
+    idx, stats, spec = _fitted(data)
+    x, y = tensor_pairs(data, idx, stats, spec)
+    cfg = TrainConfig(hidden=(8,), batch=64, epochs=2, seed=0)
+    m0, _ = train_model(x, y, x, y, cfg, verbose=False)
+    m1, _ = train_model(
+        x, y, x, y, TrainConfig(hidden=(8,), batch=64, epochs=2, seed=1), verbose=False
+    )
+    with torch.no_grad():
+        assert not torch.equal(m0(x[:64]), m1(x[:64]))
+
+
 def test_lr_finder_runs_and_starts_near_one(data: Panels) -> None:
     idx, stats, spec = _fitted(data)
     x, y = tensor_pairs(data, idx, stats, spec)
@@ -161,6 +206,65 @@ def test_lr_finder_runs_and_starts_near_one(data: Panels) -> None:
     assert len(lrs) == len(losses) == 20
     assert 0.5 < losses[0] < 2.0  # the first step is still basically untrained
     assert np.all(np.isfinite(losses[:5]))  # sane in the safe zone (MAY explode later)
+
+
+# --- predict_delta: THE shared model call --------------------------------------------
+def _checkpoint_around(model: PanelMLP, data: Panels, ablate: bool = False) -> Checkpoint:
+    idx, stats, spec = _fitted(data)
+    model.eval()
+    return Checkpoint(
+        model=model,
+        stats=stats,
+        spec=spec,
+        split=split_episodes(data.episode),
+        ablate=ablate,
+        sensor_names=data.sensor_names,
+        action_names=data.action_names,
+        dt=data.dt,
+    )
+
+
+def test_predict_delta_matches_the_pipeline_it_replaced(data: Panels) -> None:
+    """predict_delta must equal the hand-inlined featurize -> net -> de-normalize
+    it deduplicated (card.py / keystone.py / the planner all lean on this one call),
+    and `panel + delta` must agree with undo_delta -- the imagination-step identity."""
+    idx, stats, spec = _fitted(data)
+    torch.manual_seed(0)
+    ck = _checkpoint_around(PanelMLP(spec.n_features, len(data.sensor_names), (16,)), data)
+    panel, action = data.sensors[idx], data.actions[idx]
+    delta = predict_delta(ck, panel, action)
+    x = torch.from_numpy(featurize(panel, action, stats, spec).astype(np.float32))
+    with torch.no_grad():
+        z = np.asarray(ck.model(x).numpy(), dtype=np.float64)
+    assert np.array_equal(delta, z * stats.delta_std + stats.delta_mean)  # same ops, bit-for-bit
+    assert np.allclose(panel + delta, undo_delta(z, panel, stats), atol=1e-9)
+
+
+def test_predict_delta_zero_net_returns_the_mean_delta(data: Panels) -> None:
+    """Closed form: a zero net outputs z-delta 0, so the physical delta is exactly
+    the train-mean delta for every row -- pinned before any planner trusts it."""
+    _, stats, spec = _fitted(data)
+    zero = PanelMLP(spec.n_features, len(data.sensor_names), (8,))
+    with torch.no_grad():
+        for p in zero.parameters():
+            p.zero_()
+    ck = _checkpoint_around(zero, data)
+    delta = predict_delta(ck, data.sensors[:50], data.actions[:50])
+    assert np.array_equal(delta, np.broadcast_to(stats.delta_mean, delta.shape))
+
+
+def test_predict_delta_honors_the_checkpoints_own_ablate_flag(data: Panels) -> None:
+    """The twin's blindfold travels INSIDE its checkpoint: the same net predicts
+    differently once ablate=True, with no caller-side flag to forget."""
+    idx, _, spec = _fitted(data)
+    torch.manual_seed(0)
+    net = PanelMLP(spec.n_features, len(data.sensor_names), (16,))
+    seeing = _checkpoint_around(net, data, ablate=False)
+    blind = _checkpoint_around(net, data, ablate=True)
+    panel, action = data.sensors[idx], data.actions[idx]
+    assert not np.array_equal(
+        predict_delta(seeing, panel, action), predict_delta(blind, panel, action)
+    )
 
 
 # --- checkpoints ---------------------------------------------------------------------
@@ -179,5 +283,6 @@ def test_checkpoint_roundtrip_reproduces_predictions(tmp_path, data: Panels) -> 
     assert ck.sensor_names == data.sensor_names
     assert np.array_equal(ck.split.test, split.test)
     assert np.allclose(ck.stats.delta_std, stats.delta_std)
+    assert np.array_equal(ck.stats.panel_lo, stats.panel_lo)  # the clamp travels too
     with torch.no_grad():
         assert torch.equal(ck.model(x), model(x))  # identical weights => identical output
