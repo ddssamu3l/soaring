@@ -193,28 +193,33 @@ def test_score_rollouts_grades_the_three_fates_and_ranks_them() -> None:
     assert list(rank(scores)) == [0, 1, 2]
 
 
-def test_combine_scores_is_pessimistic_across_members() -> None:
-    """One optimist member, one pessimist: the merged verdict takes the crash
-    if ANY member saw one, the WORST deficit, and the SHORTEST survival --
-    a hallucinated good future must be dreamed by EVERY member to count."""
+def test_combine_scores_takes_the_median_member() -> None:
+    """Optimist, realist, pessimist: the merged verdict is the REALIST's --
+    a lone dreamed-up thermal cannot carry a candidate, and a lone dreamed-up
+    grave cannot veto one. Crash needs a majority (2 of 3)."""
     optimist = RolloutScores(
         crashed=np.array([False, False]),
-        deficit=np.array([0.0, 10.0]),
-        est_time=np.array([50.0, 60.0]),
+        deficit=np.array([0.0, 0.0]),
+        est_time=np.array([50.0, 50.0]),
         t_crash=np.array([np.inf, np.inf]),
     )
-    pessimist = RolloutScores(
+    realist = RolloutScores(
         crashed=np.array([False, True]),
-        deficit=np.array([700.0, 200.0]),
-        est_time=np.array([70.0, 80.0]),
-        t_crash=np.array([np.inf, 4.0]),
+        deficit=np.array([120.0, 300.0]),
+        est_time=np.array([60.0, 70.0]),
+        t_crash=np.array([np.inf, 9.0]),
     )
-    merged = combine_scores([optimist, pessimist])
-    assert list(merged.crashed) == [False, True]
-    assert list(merged.deficit) == [700.0, 200.0]
+    pessimist = RolloutScores(
+        crashed=np.array([True, True]),
+        deficit=np.array([900.0, 900.0]),
+        est_time=np.array([90.0, 90.0]),
+        t_crash=np.array([3.0, 4.0]),
+    )
+    merged = combine_scores([optimist, realist, pessimist])
+    assert list(merged.crashed) == [False, True]  # 1/3 no, 2/3 yes
+    assert list(merged.deficit) == [120.0, 300.0]  # the middle member's verdict
     assert list(merged.est_time) == [60.0, 70.0]
-    assert merged.t_crash[1] == 4.0
-    assert np.isinf(merged.t_crash[0])
+    assert merged.t_crash[1] == 9.0
 
 
 def test_rank_prefers_dying_later_over_dying_closer() -> None:

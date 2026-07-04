@@ -254,19 +254,22 @@ def rank(scores: RolloutScores) -> IntArr:
 
 
 def combine_scores(per_member: list[RolloutScores]) -> RolloutScores:
-    """Merge per-ensemble-member scores PESSIMISTICALLY: a candidate crashed if
-    ANY member imagines it crashing, its deficit is the WORST member's, its
-    survival the SHORTEST. One net cannot say "I don't know" -- but where
-    imagination leaves the training manifold, independently-trained members
-    disagree, and under worst-member ranking a hallucinated thermal only helps
-    a candidate if EVERY member dreams it (t3 finding: a single net invented
-    +3.4 m/s of lift in dead air and the planner flew 1 km off-corridor into
-    the fog chasing it). Dial-free: pessimism is in task units, no threshold
-    to calibrate."""
-    crashed = np.any([m.crashed for m in per_member], axis=0)
-    deficit = np.max([m.deficit for m in per_member], axis=0)
-    est_time = np.mean([m.est_time for m in per_member], axis=0)
-    t_crash = np.min([m.t_crash for m in per_member], axis=0)
+    """Merge per-ensemble-member scores by MEDIAN / MAJORITY: it takes 2 of 3
+    members to call a candidate crashed, and the deficit/time verdicts are the
+    middle member's. One net cannot say "I don't know" -- where imagination
+    leaves the training manifold, independently-trained members disagree --
+    and the median is the robust vote both ways: a lone hallucinating OPTIMIST
+    cannot carry a candidate (t3 finding: a single net dreamed +3.4 m/s of
+    lift in dead air and, under mean scoring, the planner flew 1 km into the
+    fog chasing it), and a lone PESSIMIST cannot veto the right maneuver
+    (also measured: worst-member ranking let one bagged member that dreamed
+    the winning circle into the ground ground the whole fleet -- the planner
+    could never climb again). Dial-free: no threshold to calibrate."""
+    n = len(per_member)
+    crashed = np.sum([m.crashed for m in per_member], axis=0) * 2 >= n
+    deficit = np.median([m.deficit for m in per_member], axis=0)
+    est_time = np.median([m.est_time for m in per_member], axis=0)
+    t_crash = np.median([m.t_crash for m in per_member], axis=0)
     return RolloutScores(crashed=crashed, deficit=deficit, est_time=est_time, t_crash=t_crash)
 
 
