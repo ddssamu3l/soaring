@@ -89,12 +89,17 @@ def make_world() -> tuple[Glider, ThermalMap]:
     glider = Glider()  # ASK-21-class trainer (see glider_sim.Glider)
     air = ThermalMap(
         thermals=[
-            Thermal(x0=0.0, y0=0.0, w_peak=4.0, radius=60.0),  # A: the home climb
-            # the sink band: three overlapping bowls spanning y ~ -430..430
-            Thermal(x0=500.0, y0=-250.0, w_peak=-2.2, radius=180.0),
-            Thermal(x0=500.0, y0=0.0, w_peak=-2.2, radius=180.0),
-            Thermal(x0=500.0, y0=250.0, w_peak=-2.2, radius=180.0),
-            Thermal(x0=1000.0, y0=0.0, w_peak=3.5, radius=60.0),  # B: the far top-up
+            Thermal(x0=0.0, y0=0.0, w_peak=4.0, radius=110.0),  # A: the home climb
+            #   (radius 110: real thermal scale, and a circle at sane speeds
+            #    FITS inside -- at r=60 only a perfect min-speed circle could)
+            # the sink band: three overlapping bowls spanning y ~ -450..450,
+            # strong enough that no non-climbing route survives it (verified
+            # empirically at the demo spawn; the fringes of A and B feed any
+            # straight line ~50 m of free energy, and the band must beat that)
+            Thermal(x0=500.0, y0=-250.0, w_peak=-3.0, radius=200.0),
+            Thermal(x0=500.0, y0=0.0, w_peak=-3.0, radius=200.0),
+            Thermal(x0=500.0, y0=250.0, w_peak=-3.0, radius=200.0),
+            Thermal(x0=1000.0, y0=0.0, w_peak=3.5, radius=90.0),  # B: the far top-up
         ]
     )
     return glider, air

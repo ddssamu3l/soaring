@@ -110,7 +110,7 @@ def test_imagine_batch_equals_a_per_candidate_loop(setup) -> None:
     rng = np.random.default_rng(3)
     bank_ticks = rng.uniform(-0.8, 0.8, size=(3, 6))
     pitch = 24.0
-    got = imagine(ck, panel0, bank_ticks, pitch)
+    got = imagine(ck, panel0, bank_ticks, np.full_like(bank_ticks, pitch))
     assert got.shape == (3, 7, len(ck.sensor_names))
     bank_col = ck.action_names.index("bank_cmd")
     pitch_col = ck.action_names.index("pitch_cmd")
@@ -146,7 +146,7 @@ def test_imagine_zero_net_drifts_by_the_mean_delta(setup) -> None:
     )
     panel0 = data.sensors[5]
     bank_ticks = np.linspace(-0.5, 0.5, 4 * 8).reshape(4, 8)  # actions vary, output must not
-    got = imagine(zck, panel0, bank_ticks, 24.0)
+    got = imagine(zck, panel0, bank_ticks, np.full_like(bank_ticks, 24.0))
     expected = panel0.astype(np.float64)
     assert np.allclose(got[:, 0], expected, atol=1e-9)
     for h in range(1, 9):
@@ -183,7 +183,24 @@ def test_score_rollouts_grades_the_three_fates_and_ranks_them() -> None:
     # time = horizon elapsed + still-air tail at best-glide speed
     assert scores.deficit[1] == 0.0
     assert scores.est_time[1] == pytest.approx(3 * dt + 70.0 / 25.0)
+    # the crasher: survival time recorded (first z<=0 row is h=2)
+    assert scores.t_crash[2] == pytest.approx(2 * dt)
+    assert np.isinf(scores.t_crash[0]) and np.isinf(scores.t_crash[1])
     assert list(rank(scores)) == [0, 1, 2]
+
+
+def test_rank_prefers_dying_later_over_dying_closer() -> None:
+    """When EVERY imagined future ends in the ground, the planner must keep
+    flying the airplane: a future that survives longer outranks one that gets
+    closer to the goal but dies sooner (the kamikaze-dive trap -- distance-at-
+    death only breaks exact survival ties)."""
+    goal = Goal(x=1000.0, y=0.0, radius=10.0)
+    dives = _future([[0, 0, 10, 30], [200, 0, 2, 32], [400, 0, -1, 33], [410, 0, -1, 33]])
+    lives = _future([[0, 0, 10, 20], [50, 0, 8, 20], [100, 0, 4, 20], [150, 0, -1, 20]])
+    scores = score_rollouts(np.stack([dives, lives]), NAMES, goal, POLAR, 0.1)
+    assert list(scores.crashed) == [True, True]
+    assert scores.t_crash[1] > scores.t_crash[0]
+    assert list(rank(scores)) == [1, 0]  # die last, not die close
 
 
 def test_score_rollouts_deficit_prices_energy_height_not_just_altitude() -> None:
@@ -212,16 +229,17 @@ def test_score_rollouts_arrival_before_ground_contact_counts_as_arrived() -> Non
 
 # --- CEM -------------------------------------------------------------------------------
 def test_cem_plan_respects_the_training_support_clip(setup) -> None:
-    """Every command the planner can ever emit must sit inside the data's own
-    action support -- outside it the model is ungraded and imagination is
-    hallucination. The winning plan and the refit mean both stay clipped."""
+    """Every command the planner can ever emit -- BOTH axes -- must sit inside
+    the data's own action support; outside it the model is ungraded and
+    imagination is hallucination. Winning plan and refit mean both stay clipped."""
     ck, data = setup
     goal = Goal(x=500.0, y=0.0)
     polar = best_glide(Glider())
-    plan = cem_plan(ck, data.sensors[0], goal, polar, TINY, np.random.default_rng(0), 24.0)
+    plan = cem_plan(ck, data.sensors[0], goal, polar, TINY, np.random.default_rng(0))
     assert isinstance(plan, Plan)
-    assert plan.segments.shape == (TINY.n_segments,)
-    assert np.all(np.abs(plan.segments) <= TINY.max_bank_cmd + 1e-12)
+    assert plan.segments.shape == (TINY.n_segments, 2)
+    assert np.all(np.abs(plan.segments[:, 0]) <= TINY.max_bank_cmd + 1e-12)
+    assert np.all((plan.segments[:, 1] >= TINY.pitch_lo) & (plan.segments[:, 1] <= TINY.pitch_hi))
     assert plan.imagined.shape == (TINY.horizon + 1, len(ck.sensor_names))
     assert np.array_equal(plan.imagined[0], data.sensors[0])  # dreams start from truth
 
@@ -236,10 +254,10 @@ def test_cem_plan_trace_records_the_real_search(setup) -> None:
     trace: list[CEMIteration] = []
     goal = Goal(x=500.0, y=0.0)
     polar = best_glide(Glider())
-    cem_plan(ck, data.sensors[0], goal, polar, TINY, np.random.default_rng(1), 24.0, trace=trace)
+    cem_plan(ck, data.sensors[0], goal, polar, TINY, np.random.default_rng(1), trace=trace)
     assert len(trace) == TINY.iterations
     for it in trace:
-        assert it.candidates.shape == (TINY.population, TINY.n_segments)
+        assert it.candidates.shape == (TINY.population, TINY.n_segments, 2)
         assert sorted(it.order) == list(range(TINY.population))  # a real permutation
         elites = it.candidates[it.order[: TINY.n_elites]]
         assert np.allclose(it.mean, elites.mean(axis=0))  # the refit, exactly
@@ -253,9 +271,9 @@ def test_cem_plan_warm_start_keeps_the_incumbent_alive(setup) -> None:
     ck, data = setup
     goal = Goal(x=500.0, y=0.0)
     polar = best_glide(Glider())
-    warm = np.full(TINY.n_segments, 0.3)
-    a = cem_plan(ck, data.sensors[0], goal, polar, TINY, np.random.default_rng(7), 24.0, warm)
-    b = cem_plan(ck, data.sensors[0], goal, polar, TINY, np.random.default_rng(7), 24.0, warm)
+    warm = np.tile(np.array([0.3, 24.0]), (TINY.n_segments, 1))
+    a = cem_plan(ck, data.sensors[0], goal, polar, TINY, np.random.default_rng(7), warm)
+    b = cem_plan(ck, data.sensors[0], goal, polar, TINY, np.random.default_rng(7), warm)
     assert np.array_equal(a.segments, b.segments)  # deterministic under a fixed seed
 
 

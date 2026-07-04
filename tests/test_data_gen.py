@@ -141,9 +141,14 @@ def test_world_is_decision_forcing() -> None:
     the goal' task silently degenerates back into 'just glide straight'."""
     _, air = make_world()
     assert float(air.updraft(0.0, 0.0)) > 3.0  # A: a strong home climb
+    # a NORMAL thermalling circle must fit inside A: at best-glide speed and
+    # ~40 deg bank the turn radius is ~70 m, and the lift out there must still
+    # beat the banked sink (~1 m/s) -- t3 flying proved a core you can only
+    # work with a perfect min-speed circle is a core the planner cannot use
+    assert float(air.updraft(70.0, 0.0)) > 2.0
     assert float(air.updraft(1000.0, 0.0)) > 2.5  # B: a real top-up
     for y in (-250.0, 0.0, 250.0):
-        assert float(air.updraft(500.0, y)) < -1.5  # the band sinks EVERYWHERE across
+        assert float(air.updraft(500.0, y)) < -2.5  # the band sinks HARD everywhere across
     assert abs(float(air.updraft(500.0, 900.0))) < 0.3  # ...but ends; air calms outside
 
 

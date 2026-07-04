@@ -10,10 +10,13 @@ is pure SEARCH through its imagination, done fresh at every replan:
   imagined futures -> fly the best one's first second -> reality corrects ->
   repeat.
 
-The search is the Cross-Entropy Method (CEM). Each candidate is a short vector
-of PIECEWISE-CONSTANT bank commands -- per-tick white noise would be low-pass
-filtered by the airframe's roll-rate lag into "fly straight" (every candidate
-alike, nothing to rank). Elites are never re-rolled: their statistics refit the
+The search is the Cross-Entropy Method (CEM). Each candidate is a short block
+sequence of PIECEWISE-CONSTANT (bank, speed) commands -- both stick axes.
+Per-tick white noise would be low-pass filtered by the airframe's command lag
+into "fly straight" (every candidate alike, nothing to rank), and speed must
+be plannable because climbing requires it: at fixed best-glide speed the turn
+radius is wider than a thermal core -- slowing down inside lift is how circles
+fit inside thermals. Elites are never re-rolled: their statistics refit the
 sampling Gaussian, and a fresh population is drawn from the sharpened
 distribution -- the dice learn where the good actions live.
 
@@ -88,15 +91,19 @@ class PlannerConfig:
     horizon n_segments * ticks_per_segment = 150 ticks = the keystone's 15 s.
     Everything else is a starting guess, tuned by watching it fly."""
 
-    n_segments: int = 5  # decision variables per candidate
+    n_segments: int = 5  # decision blocks per candidate (each block = bank + speed)
     ticks_per_segment: int = 30  # 3 s each -- roughly a 50-60 degree arc of turn
     population: int = 512  # candidates per CEM iteration
     n_elites: int = 64  # top-scoring candidates that refit the Gaussian
     iterations: int = 4  # sample -> rank -> refit rounds per replan
-    init_std: float = np.radians(30.0)  # first-round spread: cover the bank range
-    std_floor: float = np.radians(5.0)  # never let exploration collapse to zero
+    init_std: float = np.radians(30.0)  # first-round bank spread: cover the range
+    std_floor: float = np.radians(5.0)  # never let bank exploration collapse
+    pitch_init_std: float = 4.0  # first-round speed-command spread (m/s)
+    pitch_std_floor: float = 0.5  # never let speed exploration collapse (m/s)
     replan_ticks: int = 10  # execute 1 s of the plan, then re-sense and replan
     max_bank_cmd: float = MAX_BANK_CMD  # the training-support clip (+/-50 deg)
+    pitch_lo: float = 17.0  # speed-command clip: inside training support (15-35),
+    pitch_hi: float = 32.0  # with a margin off the sampled extremes
 
     @property
     def horizon(self) -> int:
@@ -105,17 +112,20 @@ class PlannerConfig:
 
 # --- imagination: batched free-running rollouts through the frozen model -------------
 def expand_segments(segments: FloatArr, ticks_per_segment: int) -> FloatArr:
-    """(N, K) per-segment bank commands -> (N, K*ticks) per-tick commands."""
+    """(N, K, ...) per-segment commands -> (N, K*ticks, ...): each block held."""
     return np.repeat(segments, ticks_per_segment, axis=1)
 
 
-def imagine(ck: Checkpoint, panel0: FloatArr, bank_ticks: FloatArr, pitch_cmd: float) -> FloatArr:
+def imagine(
+    ck: Checkpoint, panel0: FloatArr, bank_ticks: FloatArr, pitch_ticks: FloatArr
+) -> FloatArr:
     """Roll N candidate command schedules through the model as ONE batch.
 
-    (9,) sensed start panel + (N, H) per-tick bank commands -> (N, H+1, 9)
-    imagined panels: row 0 is the shared true start, every later row is built
-    from the model's own previous output -- keystone.free_run's exact feedback
-    loop, with the planner's candidate actions instead of logged ones.
+    (9,) sensed start panel + (N, H) per-tick bank and speed commands ->
+    (N, H+1, 9) imagined panels: row 0 is the shared true start, every later
+    row is built from the model's own previous output -- keystone.free_run's
+    exact feedback loop, with the planner's candidate actions instead of
+    logged ones.
     """
     n, horizon = bank_ticks.shape
     bank_col = ck.action_names.index("bank_cmd")
@@ -124,9 +134,9 @@ def imagine(ck: Checkpoint, panel0: FloatArr, bank_ticks: FloatArr, pitch_cmd: f
     panel = np.tile(panel0, (n, 1))
     out[:, 0] = panel
     action = np.empty((n, len(ck.action_names)))
-    action[:, pitch_col] = pitch_cmd
     for h in range(1, horizon + 1):
         action[:, bank_col] = bank_ticks[:, h - 1]
+        action[:, pitch_col] = pitch_ticks[:, h - 1]
         # the imagination step, pinned to the training range (clamp_panel).
         # Load-bearing here: CEM would otherwise actively SEEK divergent
         # dreams -- an imagined z running away to +1e9 scores deficit 0.
@@ -138,13 +148,17 @@ def imagine(ck: Checkpoint, panel0: FloatArr, bank_ticks: FloatArr, pitch_cmd: f
 # --- the cost: task arithmetic only, ranked lexicographically -------------------------
 @dataclass(frozen=True)
 class RolloutScores:
-    """Per-candidate verdicts, compared in strict order: first don't crash,
-    then minimize the glide-deficit (is the goal makeable from where this
-    future ends?), then minimize estimated total time (be fast)."""
+    """Per-candidate verdicts. Alive futures compare (deficit, then time).
+    Crashed futures rank below ALL alive ones and compare by SURVIVAL TIME
+    (die later beats die closer): when every imagined future ends in the
+    ground, racing to minimize distance-at-death is a kamikaze dive -- the
+    right move is to keep flying the airplane, because the next replan is
+    anchored on reality, which may be kinder than a pessimistic dream."""
 
     crashed: BoolArr  # imagined ground contact before reaching the goal
     deficit: FloatArr  # m of glide range still missing (0 = goal in glide/reached)
     est_time: FloatArr  # s elapsed + still-air time-to-go estimate
+    t_crash: FloatArr  # s until imagined ground contact (inf if it stays flying)
 
 
 def score_rollouts(
@@ -153,8 +167,17 @@ def score_rollouts(
     goal: Goal,
     polar: GlidePolar,
     dt: float,
+    ground_z: float = 0.0,
 ) -> RolloutScores:
     """Grade (N, H+1, 9) imagined futures against the task -- nothing else.
+
+    `ground_z` is the death line, and it must be the IMAGINATION'S floor, not
+    0: clamp_panel pins imagined z at the training minimum (~0.3 m -- crashed
+    episodes end just above impact, so z=0 exactly never occurs in data), and
+    with a 0 threshold no dream could ever die. The planner found and
+    exploited exactly that: immortal dreams skimming the pinned floor at full
+    speed, "arriving" on kinetic energy alone. A dream pinned to the data's
+    altitude floor IS a dream that hit the ground.
 
     Time-to-go is deliberately coarse (straight still-air glide at best-glide
     speed): the imagined horizon carries the real dynamics, the tail is
@@ -168,7 +191,7 @@ def score_rollouts(
 
     dist = np.hypot(imagined[:, :, xc] - goal.x, imagined[:, :, yc] - goal.y)  # (N, H+1)
     arrive_mask = dist <= goal.radius
-    ground_mask = imagined[:, :, zc] <= 0.0
+    ground_mask = imagined[:, :, zc] <= ground_z + 1e-9
     t_arrive = np.where(arrive_mask.any(axis=1), arrive_mask.argmax(axis=1), NEVER)
     t_ground = np.where(ground_mask.any(axis=1), ground_mask.argmax(axis=1), NEVER)
     arrived = t_arrive <= t_ground  # touching ground AFTER arriving doesn't count
@@ -187,14 +210,21 @@ def score_rollouts(
     # arrived futures: nothing missing, their time is the actual arrival time
     deficit = np.where(arrived & (t_arrive < NEVER), 0.0, deficit)
     est_time = np.where(arrived & (t_arrive < NEVER), np.minimum(t_arrive, horizon) * dt, est_time)
-    return RolloutScores(crashed=crashed, deficit=deficit, est_time=est_time)
+    t_crash = np.where(crashed, t_ground * dt, np.inf)
+    return RolloutScores(crashed=crashed, deficit=deficit, est_time=est_time, t_crash=t_crash)
 
 
 def rank(scores: RolloutScores) -> IntArr:
-    """Candidate indices best-to-worst. np.lexsort sorts by the LAST key first,
-    so the order is: crashed (False beats True), then deficit, then time. CEM
-    only ever needs this total order -- no unit-stitching scalar required."""
-    out: IntArr = np.lexsort((scores.est_time, scores.deficit, scores.crashed))
+    """Candidate indices best-to-worst. Alive: (deficit, then time). Crashed
+    rank below all alive and compare by (-survival, then deficit) -- die LATER
+    first; distance-at-death only breaks exact survival ties. The np.where
+    keys mix units across the alive/crashed boundary, which is legal because
+    the primary `crashed` key means they are never compared across it.
+    np.lexsort sorts by the LAST key first; CEM only ever needs this total
+    order -- no unit-stitching scalar required."""
+    key2 = np.where(scores.crashed, -scores.t_crash, scores.deficit)
+    key3 = np.where(scores.crashed, scores.deficit, scores.est_time)
+    out: IntArr = np.lexsort((key3, key2, scores.crashed))
     return out
 
 
@@ -206,9 +236,9 @@ class CEMIteration:
     candidate's imagined ground track. Only materialized when a trace list is
     passed to cem_plan -- planning itself never pays for it."""
 
-    candidates: FloatArr  # (population, K) as actually rolled (post-clip)
+    candidates: FloatArr  # (population, K, 2) as actually rolled (post-clip)
     order: IntArr  # rank(scores); order[:n_elites] are the elites
-    mean: FloatArr  # (K,) the Gaussian mean refit AFTER this round
+    mean: FloatArr  # (K, 2) the Gaussian mean refit AFTER this round
     imagined_xy: FloatArr  # (population, H+1, 2) where each candidate believed it would fly
 
 
@@ -218,8 +248,8 @@ class Plan:
     (next replan's warm start), and the winner's imagined future (the ghost --
     what the planner BELIEVED would happen, kept for honest post-mortems)."""
 
-    segments: FloatArr  # (K,) winning per-segment bank commands
-    mean: FloatArr  # (K,) final refit Gaussian mean
+    segments: FloatArr  # (K, 2) winning per-segment (bank, speed) commands
+    mean: FloatArr  # (K, 2) final refit Gaussian mean
     imagined: FloatArr  # (H+1, 9) the winner's imagined panels
 
 
@@ -230,30 +260,43 @@ def cem_plan(
     polar: GlidePolar,
     cfg: PlannerConfig,
     rng: np.random.Generator,
-    pitch_cmd: float,
     warm_mean: FloatArr | None = None,
     trace: list[CEMIteration] | None = None,
 ) -> Plan:
     """One full CEM search from the current sensed panel.
 
-    Iterate: sample a population around (mean, std), clip to the training
-    support, imagine all candidates as one batch, rank, refit mean/std to the
-    elites. The incumbent mean is always injected as candidate 0 so a good
-    warm-started plan can never be lost to sampling luck. std restarts wide
-    every replan -- exploration must survive the warm start.
+    Candidates are (K, 2) blocks of (bank_cmd, speed_cmd): BOTH stick axes are
+    planned. Speed is not a luxury -- at fixed best-glide speed the turn radius
+    (~70 m) is wider than a thermal core (60 m), so climbing is physically
+    impossible; slowing down inside lift is how real pilots (and now the
+    planner) make circles that fit. Iterate: sample a population around
+    (mean, std), clip to the training support, imagine all candidates as one
+    batch, rank, refit mean/std to the elites. The incumbent mean is always
+    injected as candidate 0 so a good warm-started plan can never be lost to
+    sampling luck. std restarts wide every replan -- exploration must survive
+    the warm start.
     """
-    mean = np.zeros(cfg.n_segments) if warm_mean is None else warm_mean.copy()
-    std = np.full(cfg.n_segments, cfg.init_std)
+    polar_speed = polar.v_best_glide
+    if warm_mean is None:
+        mean = np.zeros((cfg.n_segments, 2))
+        mean[:, 1] = polar_speed  # neutral prior: wings level at trim
+    else:
+        mean = warm_mean.copy()
+    std = np.tile(np.array([cfg.init_std, cfg.pitch_init_std]), (cfg.n_segments, 1))
+    floor = np.array([cfg.std_floor, cfg.pitch_std_floor])
     best = Plan(segments=mean, mean=mean, imagined=np.empty(0))  # overwritten below
     for _ in range(cfg.iterations):
-        cands = rng.normal(mean, std, size=(cfg.population, cfg.n_segments))
+        cands = rng.normal(mean, std, size=(cfg.population, cfg.n_segments, 2))
         cands[0] = mean  # keep the incumbent in the running
-        cands = np.clip(cands, -cfg.max_bank_cmd, cfg.max_bank_cmd)
-        imagined = imagine(ck, panel0, expand_segments(cands, cfg.ticks_per_segment), pitch_cmd)
-        order = rank(score_rollouts(imagined, ck.sensor_names, goal, polar, ck.dt))
+        cands[..., 0] = np.clip(cands[..., 0], -cfg.max_bank_cmd, cfg.max_bank_cmd)
+        cands[..., 1] = np.clip(cands[..., 1], cfg.pitch_lo, cfg.pitch_hi)
+        ticks = expand_segments(cands, cfg.ticks_per_segment)
+        imagined = imagine(ck, panel0, ticks[..., 0], ticks[..., 1])
+        ground_z = float(ck.stats.panel_lo[ck.sensor_names.index("z")])
+        order = rank(score_rollouts(imagined, ck.sensor_names, goal, polar, ck.dt, ground_z))
         elites = cands[order[: cfg.n_elites]]
         mean = elites.mean(axis=0)
-        std = np.maximum(elites.std(axis=0), cfg.std_floor)
+        std = np.maximum(elites.std(axis=0), floor)
         best = Plan(segments=cands[order[0]], mean=mean, imagined=imagined[order[0]])
         if trace is not None:
             xc, yc = ck.sensor_names.index("x"), ck.sensor_names.index("y")
@@ -297,7 +340,6 @@ def fly_to_goal(
     approximation; revisit only if the planner visibly dithers at boundaries).
     """
     polar = best_glide(sim.glider)
-    pitch_cmd = polar.v_best_glide  # pitch pinned to trim: bank is the only decision
     flight = Flight(outcome="timeout", seconds=0.0, goal=goal)
     warm: FloatArr | None = None
     ticks = 0
@@ -305,12 +347,12 @@ def fly_to_goal(
     while ticks < max_ticks:
         panel_now = sim.sense()
         panel0 = np.array([panel_now[name] for name in ck.sensor_names])
-        plan = cem_plan(ck, panel0, goal, polar, cfg, rng, pitch_cmd, warm_mean=warm)
+        plan = cem_plan(ck, panel0, goal, polar, cfg, rng, warm_mean=warm)
         flight.plans.append(plan)
         warm = plan.mean
-        bank_ticks = expand_segments(plan.segments[None, :], cfg.ticks_per_segment)[0]
+        cmd_ticks = expand_segments(plan.segments[None], cfg.ticks_per_segment)[0]
         for tick in range(cfg.replan_ticks):
-            state = sim.step(float(bank_ticks[tick]), pitch_cmd)
+            state = sim.step(float(cmd_ticks[tick, 0]), float(cmd_ticks[tick, 1]))
             ticks += 1
             if np.hypot(state.x - goal.x, state.y - goal.y) <= goal.radius:
                 flight.outcome = "arrived"
@@ -326,29 +368,32 @@ def fly_to_goal(
 
 # --- the demo: mechanics on the one-thermal world ---------------------------------------
 def main() -> None:
-    """Fly the CURRENT fixed world (one thermal at the origin) to a goal on the
-    far side of it. With a healthy starting altitude this is navigation, not
-    survival -- it demonstrates the sense->imagine->rank->act LOOP works; the
-    decision-forcing task (climb or fail) arrives with the two-thermal world."""
+    """THE t3 task: from 40 m -- takeoff height -- reach a goal 1.6 km away on
+    the far side of the sink band. Verified unreachable without climbing:
+    NINE hand-crafted no-climb routes (straight, five around-the-band
+    variants, through-B, and around-then-refuel-through-B) all crash in the
+    real sim from this start. The only winning shape is a pilot's: climb at
+    A, commit across the band, top up at B if needed, final-glide in.
+    Nothing in the cost says any of that -- if it happens, it emerged."""
     here = Path(__file__).resolve().parent
     ck = load_checkpoint(here / "data" / "model_full.pt")
     glider, air = make_world()
     polar = best_glide(glider)
     print(f"own polar: best glide {polar.v_best_glide:.1f} m/s at L/D {polar.glide_ratio:.1f}")
 
-    start = GliderState(x=-150.0, y=-150.0, z=350.0, heading=0.0, airspeed=24.0, bank=0.0)
-    goal = Goal(x=250.0, y=250.0)  # past the thermal, ~570 m out
-    sim = Simulation(glider, air, start)
-    cfg = PlannerConfig()
-    print(f"flying to ({goal.x:g}, {goal.y:g}) r={goal.radius:g} m from ({start.x:g}, {start.y:g})")
+    start = GliderState(x=-80.0, y=0.0, z=40.0, heading=0.0, airspeed=24.0, bank=0.0)
+    goal = Goal(x=1500.0, y=0.0)
+    reach = (start.z + (start.airspeed**2 - polar.v_best_glide**2) / 19.62) * polar.glide_ratio
+    need = float(np.hypot(goal.x - start.x, goal.y - start.y))
+    print(f"to goal: {need:.0f} m; still-air reach from start: {reach:.0f} m -> MUST climb")
 
-    flight = fly_to_goal(sim, ck, goal, cfg, rng=np.random.default_rng(0))
+    sim = Simulation(glider, air, start)
+    flight = fly_to_goal(
+        sim, ck, goal, PlannerConfig(), np.random.default_rng(0), max_seconds=360.0
+    )
 
     s = sim.state
-    straight = float(np.hypot(goal.x - start.x, goal.y - start.y))
-    floor_time = straight / polar.v_best_glide
     print(f"\noutcome: {flight.outcome.upper()} in {flight.seconds:.1f} s")
-    print(f"  straight-line {straight:.0f} m; best-glide straight-run ~{floor_time:.1f} s")
     print(
         f"  final state: z={s.z:.0f} m, airspeed={s.airspeed:.1f} m/s, {len(flight.plans)} replans"
     )
