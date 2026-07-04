@@ -28,7 +28,7 @@
     {
       "id": "t3",
       "title": "Add a planner (CEM/MPC) + navigate to a goal",
-      "status": "pending",
+      "status": "active",
       "deps": [
         "t2"
       ],
