@@ -147,7 +147,11 @@ def sample_commands(
     speeds_l: list[FloatArray] = []
     total = 0
     while total < n_steps:
-        hold = hold_steps if rng.random() < 0.5 else int(rng.uniform(5, 15) * hold_steps)
+        # 70/30 short/long: long holds teach sustained maneuvers (circles!),
+        # short jitter teaches sharp transitions (thermal edges, the wall's
+        # gradient) -- a 50/50 mix diluted the transitions and free-running
+        # vario tracking degraded (keystone vario RMS 1.4 -> 2.9)
+        hold = hold_steps if rng.random() < 0.7 else int(rng.uniform(5, 15) * hold_steps)
         banks_l.append(np.full(hold, rng.uniform(-MAX_BANK_CMD, MAX_BANK_CMD)))
         speeds_l.append(np.full(hold, rng.uniform(*SPEED_CMD_RANGE)))
         total += hold
@@ -197,7 +201,7 @@ def rows_from_rollout(
 
 
 def generate_dataset(
-    n_rollouts: int = 600,  # t3 corridor is ~10x the t1 box's area; 3x rows is the
+    n_rollouts: int = 800,  # t3 corridor is ~10x the t1 box's area; 4x rows is the
     #   coverage bet -- card.py + keystone.py must ratify it (or we add data)
     steps_per_rollout: int = 600,  # 60 s of flight at dt=0.1
     hold_steps: int = 10,  # resample the stick every 1 s
