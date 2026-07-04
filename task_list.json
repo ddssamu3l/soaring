@@ -28,14 +28,14 @@
     {
       "id": "t3",
       "title": "Add a planner (CEM/MPC) + navigate to a goal",
-      "status": "active",
+      "status": "done",
       "deps": [
         "t2"
       ],
       "files": [
         "planner.py"
       ],
-      "commit": null,
+      "commit": "999e1a5952467ee7dee94969a58dc4d08bb3dacd",
       "notes": "Use rung-1's predictor to imagine action sequences, score them, pick the best. TASK = REACH A GOAL, not endurance (endurance is the reactive trap \u2014 greedy 'turn toward lift' wins it; navigation forces commitment). Field still fixed (baked into weights, no memory yet). Minimal decision-forcing world: two thermals + sink between + goal past the second. Now it tries to soar."
     },
     {
