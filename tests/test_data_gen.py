@@ -134,6 +134,32 @@ def test_random_starts_are_airworthy() -> None:
         assert s.bank == 0.0
 
 
+def test_world_is_decision_forcing() -> None:
+    """Pin the t3 world's SHAPE (not its exact numbers): real lift at home
+    thermal A and far thermal B, real SINK all across the band between them,
+    calm air off-corridor. If a tweak ever un-walls the corridor, the 'reach
+    the goal' task silently degenerates back into 'just glide straight'."""
+    _, air = make_world()
+    assert float(air.updraft(0.0, 0.0)) > 3.0  # A: a strong home climb
+    assert float(air.updraft(1000.0, 0.0)) > 2.5  # B: a real top-up
+    for y in (-250.0, 0.0, 250.0):
+        assert float(air.updraft(500.0, y)) < -1.5  # the band sinks EVERYWHERE across
+    assert abs(float(air.updraft(500.0, 900.0))) < 0.3  # ...but ends; air calms outside
+
+
+def test_random_starts_cover_the_task_corridor() -> None:
+    """Spawns must span the whole corridor (A, the band, past B) and reach down
+    to near-ground: the planner may only be routed through air the model has
+    actually flown, and the decision task starts LOW (crashes included)."""
+    rng = np.random.default_rng(7)
+    starts = [random_start(rng) for _ in range(300)]
+    xs = np.array([s.x for s in starts])
+    zs = np.array([s.z for s in starts])
+    assert xs.min() < -100.0 and xs.max() > 1100.0  # both thermals and beyond
+    assert zs.min() < 80.0  # near-ground spawns exist...
+    assert zs.max() > 450.0  # ...and high cruise too
+
+
 def test_dataset_carries_a_live_wingtip_cue() -> None:
     # the bird cue must actually vary in real rollouts (a dead column would
     # mean the factory or the sensor silently broke) and stay bounded by the

@@ -39,8 +39,9 @@ def _cam(mode: str, size: tuple[int, int] = (640, 400)) -> Camera:
 
 # ------------------------------------------------------------------- world
 def test_world_normalizes_to_its_own_peak(world: WorldScene) -> None:
-    """One 4 m/s thermal at the origin; the sample grid contains its center."""
-    assert world.w_ref == pytest.approx(4.0, abs=1e-6)
+    """Thermal A (4 m/s) dominates the t3 field; finite grid sampling and the
+    sink band's overlapping tails may shave a hair off the exact peak."""
+    assert world.w_ref == pytest.approx(4.0, abs=0.05)
 
 
 def test_heatmap_encodes_the_field(world: WorldScene) -> None:
@@ -56,7 +57,8 @@ def test_heatmap_encodes_the_field(world: WorldScene) -> None:
 
 def test_world_geometry_counts(world: WorldScene) -> None:
     assert len(world.grid_lines) == 18  # 9 north-south + 9 east-west hairlines
-    assert len(world.rings) == 1 and len(world.columns) == 1  # one thermal today
+    n = len(make_world()[1].thermals)  # one ring+column per thermal, sink included
+    assert len(world.rings) == n and len(world.columns) == n
     assert len(world.glow_rings[0]) == 4  # nested perspective glow
 
 

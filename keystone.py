@@ -73,6 +73,20 @@ def rollout_starts(data: Panels, test_eps: IntArr, horizon: int, stride: int) ->
     return np.asarray(starts, dtype=np.int64)
 
 
+def plot_bounds(
+    truth: FloatArr, xc: int, yc: int, margin: float = 100.0
+) -> tuple[float, float, float, float]:
+    """(xlo, xhi, ylo, yhi) covering every true flight path plus a margin --
+    the ghost chart's field grid follows the DATA, not a hardcoded arena size
+    (the t1 world fit in +/-250 m; the t3 decision corridor does not)."""
+    return (
+        float(truth[:, :, xc].min() - margin),
+        float(truth[:, :, xc].max() + margin),
+        float(truth[:, :, yc].min() - margin),
+        float(truth[:, :, yc].max() + margin),
+    )
+
+
 def check_shared_test_split(full: Checkpoint, twin: Checkpoint) -> None:
     """Refuse to compare checkpoints that hold different TEST episodes. If the
     twin were ever retrained with another split seed, its 'held-out' rollouts
@@ -223,7 +237,8 @@ def main() -> None:
     # ghost paths: the keystone as a picture of flying (3 example rollouts).
     # Thermal truth for HUMAN EYES only -- the firewall forbids it as model input.
     _, air = make_world()
-    gx, gy = np.meshgrid(np.linspace(-250, 250, 200), np.linspace(-250, 250, 200))
+    xlo, xhi, ylo, yhi = plot_bounds(truth, xc, yc)
+    gx, gy = np.meshgrid(np.linspace(xlo, xhi, 200), np.linspace(ylo, yhi, 200))
     ghosts = []
     for i in np.linspace(0, len(starts) - 1, 3, dtype=int):
         ghosts.append(

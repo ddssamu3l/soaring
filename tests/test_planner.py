@@ -221,6 +221,26 @@ def test_cem_plan_respects_the_training_support_clip(setup) -> None:
     assert np.array_equal(plan.imagined[0], data.sensors[0])  # dreams start from truth
 
 
+def test_cem_plan_trace_records_the_real_search(setup) -> None:
+    """The trace must be the search itself, not a summary: one entry per
+    iteration, order a true permutation of the population, and the recorded
+    mean exactly the elites' mean -- the CEM refit, pinned."""
+    ck, data = setup
+    from planner import CEMIteration
+
+    trace: list[CEMIteration] = []
+    goal = Goal(x=500.0, y=0.0)
+    polar = best_glide(Glider())
+    cem_plan(ck, data.sensors[0], goal, polar, TINY, np.random.default_rng(1), 24.0, trace=trace)
+    assert len(trace) == TINY.iterations
+    for it in trace:
+        assert it.candidates.shape == (TINY.population, TINY.n_segments)
+        assert sorted(it.order) == list(range(TINY.population))  # a real permutation
+        elites = it.candidates[it.order[: TINY.n_elites]]
+        assert np.allclose(it.mean, elites.mean(axis=0))  # the refit, exactly
+        assert it.imagined_xy.shape == (TINY.population, TINY.horizon + 1, 2)
+
+
 def test_cem_plan_warm_start_keeps_the_incumbent_alive(setup) -> None:
     """The warm-started mean is injected as candidate 0 every iteration, so a
     plan can only be replaced by one the cost ranks BETTER -- never lost to

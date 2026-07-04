@@ -197,6 +197,19 @@ def rank(scores: RolloutScores) -> IntArr:
 
 # --- the CEM search --------------------------------------------------------------------
 @dataclass(frozen=True)
+class CEMIteration:
+    """One CEM round, recorded for visualization/analysis: the sampled
+    population, its best-to-worst ordering, the refit mean, and every
+    candidate's imagined ground track. Only materialized when a trace list is
+    passed to cem_plan -- planning itself never pays for it."""
+
+    candidates: FloatArr  # (population, K) as actually rolled (post-clip)
+    order: IntArr  # rank(scores); order[:n_elites] are the elites
+    mean: FloatArr  # (K,) the Gaussian mean refit AFTER this round
+    imagined_xy: FloatArr  # (population, H+1, 2) where each candidate believed it would fly
+
+
+@dataclass(frozen=True)
 class Plan:
     """One replan's result: the winning candidate, the refit sampling mean
     (next replan's warm start), and the winner's imagined future (the ghost --
@@ -216,6 +229,7 @@ def cem_plan(
     rng: np.random.Generator,
     pitch_cmd: float,
     warm_mean: FloatArr | None = None,
+    trace: list[CEMIteration] | None = None,
 ) -> Plan:
     """One full CEM search from the current sensed panel.
 
@@ -238,6 +252,16 @@ def cem_plan(
         mean = elites.mean(axis=0)
         std = np.maximum(elites.std(axis=0), cfg.std_floor)
         best = Plan(segments=cands[order[0]], mean=mean, imagined=imagined[order[0]])
+        if trace is not None:
+            xc, yc = ck.sensor_names.index("x"), ck.sensor_names.index("y")
+            trace.append(
+                CEMIteration(
+                    candidates=cands,
+                    order=order,
+                    mean=mean.copy(),
+                    imagined_xy=imagined[:, :, [xc, yc]],
+                )
+            )
     return best
 
 

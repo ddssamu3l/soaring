@@ -1,8 +1,9 @@
 """
 data_gen.py -- turn the sim into a DATA FACTORY (roadmap step 1 / task t1).
 
-Runs many rollouts in ONE fixed world (the steps-1-4 regime: a single frozen
-thermal), flying randomized stick commands, and logs every tick as a row:
+Runs many rollouts in ONE fixed world (the steps-1-4 regime: a frozen field --
+since t3, the DECISION world: thermal A, a sink band, thermal B), flying
+randomized stick commands, and logs every tick as a row:
 
     (true_state_t, action_t, sensors_t, true_state_t+1)
 
@@ -71,27 +72,47 @@ SPEED_CMD_RANGE = (15.0, 35.0)  # m/s; stall is ~16, so the slow end mushes
 
 
 def make_world() -> tuple[Glider, ThermalMap]:
-    """THE fixed world of steps 1-4: one thermal at the origin, no wind, and
-    one default airframe. Every rollout flies this exact world, so the MLP can
-    absorb the field into its weights (that's the point of the fixed-field
-    phase). Randomizing worlds/gliders is step 5's job, and it happens HERE.
+    """THE fixed world of steps 1-4 -- since t3, the DECISION world.
+
+    One thermal proved the loop (t1/t2). t3's task -- REACH A GOAL -- only
+    forces a decision if the straight line cannot work, so the world becomes:
+    home thermal A at the origin, a broad SINK band walling off the corridor
+    around x~500 (real thermals are ringed by compensating sink; here it is
+    arranged so "just glide at the goal" is a losing plan), and a weaker
+    thermal B beyond it as the far-side top-up. From a low spawn, a goal past
+    B is out of glide range until the glider CLIMBS at A first.
+
+    Still ONE frozen field for every episode, so the MLP absorbs it into its
+    weights (the point of the fixed-field phase). Randomizing worlds/gliders
+    is step 5's job, and it happens HERE.
     """
     glider = Glider()  # ASK-21-class trainer (see glider_sim.Glider)
-    air = ThermalMap(thermals=[Thermal(x0=0.0, y0=0.0, w_peak=4.0, radius=60.0)])
+    air = ThermalMap(
+        thermals=[
+            Thermal(x0=0.0, y0=0.0, w_peak=4.0, radius=60.0),  # A: the home climb
+            # the sink band: three overlapping bowls spanning y ~ -430..430
+            Thermal(x0=500.0, y0=-250.0, w_peak=-2.2, radius=180.0),
+            Thermal(x0=500.0, y0=0.0, w_peak=-2.2, radius=180.0),
+            Thermal(x0=500.0, y0=250.0, w_peak=-2.2, radius=180.0),
+            Thermal(x0=1000.0, y0=0.0, w_peak=3.5, radius=60.0),  # B: the far top-up
+        ]
+    )
     return glider, air
 
 
 def random_start(rng: np.random.Generator) -> GliderState:
-    """A random spawn: anywhere in a +/-150 m box around the thermal (radius
-    60 m) -- covering strong core, gradient edge, and dead air -- at any
-    heading, wings level, at a healthy random airspeed. Altitude varies so z
-    stays decorrelated from time-in-episode (z is dynamically irrelevant in
-    the fixed field; the MLP should get the chance to discover that).
+    """A random spawn anywhere in the task corridor: A's neighborhood, the
+    sink band, past B -- the model must have FLOWN all the air it will later
+    be asked to imagine (a planner routed through un-flown sky is scoring
+    ungraded hallucinations). Altitude now reaches near-ground: the decision
+    task spawns low, so low-altitude dynamics must be in the data -- which
+    also means some rollouts CRASH, and their shortened episodes are real,
+    wanted rows (the ground is part of the world).
     """
     return GliderState(
-        x=float(rng.uniform(-150.0, 150.0)),
-        y=float(rng.uniform(-150.0, 150.0)),
-        z=float(rng.uniform(300.0, 700.0)),
+        x=float(rng.uniform(-250.0, 1250.0)),
+        y=float(rng.uniform(-350.0, 350.0)),
+        z=float(rng.uniform(30.0, 600.0)),
         heading=float(rng.uniform(0.0, 2.0 * np.pi)),
         airspeed=float(rng.uniform(18.0, 30.0)),
         bank=0.0,
@@ -155,7 +176,8 @@ def rows_from_rollout(
 
 
 def generate_dataset(
-    n_rollouts: int = 200,
+    n_rollouts: int = 600,  # t3 corridor is ~10x the t1 box's area; 3x rows is the
+    #   coverage bet -- card.py + keystone.py must ratify it (or we add data)
     steps_per_rollout: int = 600,  # 60 s of flight at dt=0.1
     hold_steps: int = 10,  # resample the stick every 1 s
     dt: float = 0.1,

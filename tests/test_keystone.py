@@ -20,6 +20,7 @@ from keystone import (
     check_shared_test_split,
     free_run,
     persistence_run,
+    plot_bounds,
     position_error,
     rollout_starts,
     save_rollouts,
@@ -201,6 +202,19 @@ def test_save_rollouts_roundtrip_pins_the_alignment(setup, tmp_path) -> None:
             assert np.array_equal(d["true"][:, h], data.sensors[starts + h])
         # ... and every imagination starts at the true panel
         assert np.array_equal(d["rollouts_full"][:, 0], d["true"][:, 0])
+
+
+def test_plot_bounds_contain_every_path_with_margin(setup) -> None:
+    """The ghost chart's field grid must follow the data: every true path point
+    strictly inside the bounds, with the margin actually applied."""
+    ck, data = setup
+    starts = rollout_starts(data, ck.split.test, H, STRIDE)
+    truth = true_panels(data, starts, H)
+    xlo, xhi, ylo, yhi = plot_bounds(truth, 0, 1, margin=50.0)
+    assert xlo <= truth[:, :, 0].min() - 50.0 + 1e-9
+    assert xhi >= truth[:, :, 0].max() + 50.0 - 1e-9
+    assert ylo <= truth[:, :, 1].min() - 50.0 + 1e-9
+    assert yhi >= truth[:, :, 1].max() + 50.0 - 1e-9
 
 
 def test_persistence_error_grows(setup) -> None:
