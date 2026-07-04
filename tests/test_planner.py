@@ -20,8 +20,10 @@ from planner import (
     Goal,
     Plan,
     PlannerConfig,
+    RolloutScores,
     best_glide,
     cem_plan,
+    combine_scores,
     expand_segments,
     fly_to_goal,
     imagine,
@@ -179,14 +181,40 @@ def test_score_rollouts_grades_the_three_fates_and_ranks_them() -> None:
     # the arriver: deficit 0, time = first in-radius step (h=2) * dt
     assert scores.deficit[0] == 0.0
     assert scores.est_time[0] == pytest.approx(2 * dt)
-    # the glider ends at (30,0,197,25): 70 m short, in glide (197*30 >> 70) -> deficit 0,
-    # time = horizon elapsed + still-air tail at best-glide speed
+    # the glider ends at (30,0,197,25): 70 m short, in glide (197*30 >> 70) -> deficit 0.
+    # est_time is the WORST over the checkpoints (h=1 and h=3): the halfway
+    # point is farther out, so its estimate dominates -- solvency at every
+    # certified waypoint, not just the dream's finale
     assert scores.deficit[1] == 0.0
-    assert scores.est_time[1] == pytest.approx(3 * dt + 70.0 / 25.0)
+    assert scores.est_time[1] == pytest.approx(max(1 * dt + 90.0 / 25.0, 3 * dt + 70.0 / 25.0))
     # the crasher: survival time recorded (first z<=0 row is h=2)
     assert scores.t_crash[2] == pytest.approx(2 * dt)
     assert np.isinf(scores.t_crash[0]) and np.isinf(scores.t_crash[1])
     assert list(rank(scores)) == [0, 1, 2]
+
+
+def test_combine_scores_is_pessimistic_across_members() -> None:
+    """One optimist member, one pessimist: the merged verdict takes the crash
+    if ANY member saw one, the WORST deficit, and the SHORTEST survival --
+    a hallucinated good future must be dreamed by EVERY member to count."""
+    optimist = RolloutScores(
+        crashed=np.array([False, False]),
+        deficit=np.array([0.0, 10.0]),
+        est_time=np.array([50.0, 60.0]),
+        t_crash=np.array([np.inf, np.inf]),
+    )
+    pessimist = RolloutScores(
+        crashed=np.array([False, True]),
+        deficit=np.array([700.0, 200.0]),
+        est_time=np.array([70.0, 80.0]),
+        t_crash=np.array([np.inf, 4.0]),
+    )
+    merged = combine_scores([optimist, pessimist])
+    assert list(merged.crashed) == [False, True]
+    assert list(merged.deficit) == [700.0, 200.0]
+    assert list(merged.est_time) == [60.0, 70.0]
+    assert merged.t_crash[1] == 4.0
+    assert np.isinf(merged.t_crash[0])
 
 
 def test_rank_prefers_dying_later_over_dying_closer() -> None:
@@ -246,7 +274,7 @@ def test_cem_plan_respects_the_training_support_clip(setup) -> None:
     ck, data = setup
     goal = Goal(x=500.0, y=0.0)
     polar = best_glide(Glider())
-    plan = cem_plan(ck, data.sensors[0], goal, polar, TINY, np.random.default_rng(0))
+    plan = cem_plan([ck], data.sensors[0], goal, polar, TINY, np.random.default_rng(0))
     assert isinstance(plan, Plan)
     assert plan.segments.shape == (TINY.n_segments, 2)
     assert np.all(np.abs(plan.segments[:, 0]) <= TINY.max_bank_cmd + 1e-12)
@@ -265,7 +293,7 @@ def test_cem_plan_trace_records_the_real_search(setup) -> None:
     trace: list[CEMIteration] = []
     goal = Goal(x=500.0, y=0.0)
     polar = best_glide(Glider())
-    cem_plan(ck, data.sensors[0], goal, polar, TINY, np.random.default_rng(1), trace=trace)
+    cem_plan([ck], data.sensors[0], goal, polar, TINY, np.random.default_rng(1), trace=trace)
     assert len(trace) == TINY.iterations
     for it in trace:
         assert it.candidates.shape == (TINY.population, TINY.n_segments, 2)
@@ -285,6 +313,32 @@ def test_config_anchors_hold() -> None:
     assert cfg.reserve_height > 0.0  # plan to ARRIVE with altitude, not to graze the fence
 
 
+def test_cem_plan_always_considers_the_primitive_repertoire(setup) -> None:
+    """Circle-left, circle-right and run-straight are standing candidates in
+    every CEM round -- the pilot's repertoire must be considered even when the
+    warm-started sampling distribution has drifted somewhere else entirely."""
+    from planner import CEMIteration
+
+    ck, data = setup
+    trace: list[CEMIteration] = []
+    polar = best_glide(Glider())
+    cem_plan(
+        [ck],
+        data.sensors[0],
+        Goal(x=500.0, y=0.0),
+        polar,
+        TINY,
+        np.random.default_rng(2),
+        trace=trace,
+    )
+    for it in trace:
+        assert np.allclose(it.candidates[1, :, 0], 0.70)  # circle right...
+        assert np.allclose(it.candidates[1, :, 1], 19.0)  # ...slow
+        assert np.allclose(it.candidates[2, :, 0], -0.70)  # circle left
+        assert np.allclose(it.candidates[3, :, 0], 0.0)  # run straight
+        assert np.allclose(it.candidates[3, :, 1], polar.v_best_glide)
+
+
 def test_cem_plan_warm_start_keeps_the_incumbent_alive(setup) -> None:
     """The warm-started mean is injected as candidate 0 every iteration, so a
     plan can only be replaced by one the cost ranks BETTER -- never lost to
@@ -293,8 +347,8 @@ def test_cem_plan_warm_start_keeps_the_incumbent_alive(setup) -> None:
     goal = Goal(x=500.0, y=0.0)
     polar = best_glide(Glider())
     warm = np.tile(np.array([0.3, 24.0]), (TINY.n_segments, 1))
-    a = cem_plan(ck, data.sensors[0], goal, polar, TINY, np.random.default_rng(7), warm)
-    b = cem_plan(ck, data.sensors[0], goal, polar, TINY, np.random.default_rng(7), warm)
+    a = cem_plan([ck], data.sensors[0], goal, polar, TINY, np.random.default_rng(7), warm)
+    b = cem_plan([ck], data.sensors[0], goal, polar, TINY, np.random.default_rng(7), warm)
     assert np.array_equal(a.segments, b.segments)  # deterministic under a fixed seed
 
 
@@ -310,7 +364,9 @@ def test_fly_to_goal_declares_arrival_at_the_goal_circle(setup) -> None:
     arrives within a couple of seconds, and the executor must say so."""
     ck, _ = setup
     sim = _sim()
-    flight = fly_to_goal(sim, ck, Goal(x=40.0, y=0.0, radius=30.0), TINY, np.random.default_rng(0))
+    flight = fly_to_goal(
+        sim, [ck], Goal(x=40.0, y=0.0, radius=30.0), TINY, np.random.default_rng(0)
+    )
     assert flight.outcome == "arrived"
     assert flight.seconds <= 5.0
     assert len(flight.plans) >= 1
@@ -323,7 +379,7 @@ def test_fly_to_goal_times_out_honestly_when_the_goal_is_unreachable(setup) -> N
     ck, _ = setup
     sim = _sim()
     flight = fly_to_goal(
-        sim, ck, Goal(x=1e7, y=0.0), TINY, np.random.default_rng(0), max_seconds=2.0
+        sim, [ck], Goal(x=1e7, y=0.0), TINY, np.random.default_rng(0), max_seconds=2.0
     )
     assert flight.outcome == "timeout"
     assert flight.seconds == pytest.approx(2.0)

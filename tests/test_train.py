@@ -183,6 +183,22 @@ def test_training_learns_and_keeps_the_best_val_weights(data: Panels) -> None:
     assert final == pytest.approx(min(hist.val_loss), abs=1e-6)  # best snapshot was kept
 
 
+def test_different_seeds_train_different_members(data: Panels) -> None:
+    """The ensemble's whole value is diversity: two members trained on the same
+    rows with different seeds must NOT be the same function -- if seeding ever
+    stopped reaching init/shuffle, worst-member voting would silently become
+    single-model planning."""
+    idx, stats, spec = _fitted(data)
+    x, y = tensor_pairs(data, idx, stats, spec)
+    cfg = TrainConfig(hidden=(8,), batch=64, epochs=2, seed=0)
+    m0, _ = train_model(x, y, x, y, cfg, verbose=False)
+    m1, _ = train_model(
+        x, y, x, y, TrainConfig(hidden=(8,), batch=64, epochs=2, seed=1), verbose=False
+    )
+    with torch.no_grad():
+        assert not torch.equal(m0(x[:64]), m1(x[:64]))
+
+
 def test_lr_finder_runs_and_starts_near_one(data: Panels) -> None:
     idx, stats, spec = _fitted(data)
     x, y = tensor_pairs(data, idx, stats, spec)

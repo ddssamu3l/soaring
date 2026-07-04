@@ -131,18 +131,30 @@ def random_start(rng: np.random.Generator) -> GliderState:
 def sample_commands(
     rng: np.random.Generator, n_steps: int, hold_steps: int
 ) -> tuple[FloatArray, FloatArray]:
-    """Piecewise-constant stick schedules: one (bank_cmd, pitch_cmd) draw per
-    block of `hold_steps` ticks, held so consequences complete (see module
-    docstring). Bank covers both signs; pitch_cmd is a target AIRSPEED (m/s).
+    """Piecewise-constant stick schedules with a MIXTURE of hold lengths: each
+    block draws one (bank_cmd, pitch_cmd) and holds it for hold_steps ticks
+    (half the blocks) or 5-15x that (the other half). The long holds are
+    load-bearing for t3: with 1 s holds only, 600 episodes contain not one
+    sustained circle -- the exact maneuver a thermalling planner must imagine.
+    A model is only gradeable on trajectories the data contains, and free-
+    running dreams of never-flown maneuvers collapse (measured: reality climbs
+    a sustained circle 60->110 m, every trained member dreamed it into the
+    ground). Still a random policy: no expert, no field knowledge -- just
+    consequences allowed to COMPLETE. Bank covers both signs; pitch_cmd is a
+    target AIRSPEED (m/s).
     """
-    n_blocks = -(-n_steps // hold_steps)  # ceil division
-
-    def held(levels: FloatArray) -> FloatArray:
-        return np.repeat(levels, hold_steps)[:n_steps].astype(np.float64)
-
-    banks = rng.uniform(-MAX_BANK_CMD, MAX_BANK_CMD, size=n_blocks)
-    speeds = rng.uniform(SPEED_CMD_RANGE[0], SPEED_CMD_RANGE[1], size=n_blocks)
-    return held(banks), held(speeds)
+    banks_l: list[FloatArray] = []
+    speeds_l: list[FloatArray] = []
+    total = 0
+    while total < n_steps:
+        hold = hold_steps if rng.random() < 0.5 else int(rng.uniform(5, 15) * hold_steps)
+        banks_l.append(np.full(hold, rng.uniform(-MAX_BANK_CMD, MAX_BANK_CMD)))
+        speeds_l.append(np.full(hold, rng.uniform(*SPEED_CMD_RANGE)))
+        total += hold
+    return (
+        np.concatenate(banks_l)[:n_steps].astype(np.float64),
+        np.concatenate(speeds_l)[:n_steps].astype(np.float64),
+    )
 
 
 def fly_rollout(sim: Simulation, banks: FloatArray, speeds: FloatArray) -> None:

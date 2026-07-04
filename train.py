@@ -44,7 +44,7 @@ advance what healthy looks like):
 Run:  .venv/bin/python train.py    (needs data/dataset.npz; rebuild via data_gen.py)
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -536,12 +536,20 @@ def main() -> None:
 
     # Train the full model and the blindfolded twin IDENTICALLY -- same data rows,
     # same seed, same schedule; the only difference is the zeroed lift columns.
+    # The full model is an ENSEMBLE of ENSEMBLE_SIZE members (seeds 0,1,2 --
+    # same data, different init + shuffle): one net cannot say "I don't know",
+    # but three independently-trained nets DISAGREE exactly where imagination
+    # leaves the training manifold, and the planner ranks candidates by their
+    # WORST member (t3 finding: a single net dreamed a +3.4 m/s thermal in
+    # dead off-corridor air and the planner flew into it). model_full.pt is
+    # member 0 -- keystone/card grade THE model; the extras are planner fuel.
     curves: dict[str, tuple[list[float], list[float]]] = {}
-    for name, ablate in (("full", False), ("twin", True)):
+    jobs = [("full", False, 0), ("full_s1", False, 1), ("full_s2", False, 2), ("twin", True, 0)]
+    for name, ablate, seed in jobs:
         print(f"\ntraining the {name} model {'(lift senses zeroed)' if ablate else ''}...")
         xt, yt = tensor_pairs(data, role_pairs["train"], stats, spec, ablate)
         xv, yv = tensor_pairs(data, role_pairs["val"], stats, spec, ablate)
-        model, hist = train_model(xt, yt, xv, yv, cfg)
+        model, hist = train_model(xt, yt, xv, yv, replace(cfg, seed=seed))
         save_checkpoint(here / "data" / f"model_{name}.pt", model, cfg, stats, split, data, ablate)
         curves[name] = (hist.train_loss, hist.val_loss)
         print(f"  best val {min(hist.val_loss):.5f}  ->  data/model_{name}.pt")

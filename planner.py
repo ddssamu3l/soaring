@@ -211,16 +211,26 @@ def score_rollouts(
     arrived = t_arrive <= t_ground  # touching ground AFTER arriving doesn't count
     crashed = (~arrived) & (t_ground < NEVER)
 
-    # end-state arithmetic for the futures still in the air and short of the goal:
+    # solvency arithmetic at CHECKPOINTS along the dream, not only its end:
     # kinetic energy above best-glide speed is convertible altitude (the sim's own
     # speed<->height exchange makes it fungible), so reach = energy height * L/D.
-    remaining = dist[:, horizon]
-    z_end = imagined[:, horizon, zc]
-    v_end = imagined[:, horizon, vc]
-    energy_height = np.maximum(z_end + (v_end**2 - polar.v_best_glide**2) / (2.0 * G), 0.0)
-    usable_height = np.maximum(energy_height - reserve_height, 0.0)
-    deficit = np.maximum(remaining - usable_height * polar.glide_ratio, 0.0)
-    est_time = horizon * dt + remaining / polar.v_best_glide
+    # Scored at the halfway point AND the end, taking the WORST -- imagination
+    # degrades with depth (keystone: sigma 0.87 at 30 s vs 0.55 at 15 s), and a
+    # plan whose solvency lives entirely in its late, weakly-certified dream is
+    # a procrastinator's plan: the executed first second drifts while the payoff
+    # is forever 20 s away (t3 flying: every winning plan promised a glorious
+    # late climb; the flown prefixes quietly left the thermal and died).
+    deficit = np.zeros(len(imagined))
+    est_time = np.zeros(len(imagined))
+    for h in (horizon // 2, horizon):
+        rem_h = dist[:, h]
+        z_h = imagined[:, h, zc]
+        v_h = imagined[:, h, vc]
+        energy_height = np.maximum(z_h + (v_h**2 - polar.v_best_glide**2) / (2.0 * G), 0.0)
+        usable_height = np.maximum(energy_height - reserve_height, 0.0)
+        deficit = np.maximum(deficit, rem_h - usable_height * polar.glide_ratio)
+        est_time = np.maximum(est_time, h * dt + rem_h / polar.v_best_glide)
+    deficit = np.maximum(deficit, 0.0)
 
     # arrived futures: nothing missing, their time is the actual arrival time
     deficit = np.where(arrived & (t_arrive < NEVER), 0.0, deficit)
@@ -241,6 +251,23 @@ def rank(scores: RolloutScores) -> IntArr:
     key3 = np.where(scores.crashed, scores.deficit, scores.est_time)
     out: IntArr = np.lexsort((key3, key2, scores.crashed))
     return out
+
+
+def combine_scores(per_member: list[RolloutScores]) -> RolloutScores:
+    """Merge per-ensemble-member scores PESSIMISTICALLY: a candidate crashed if
+    ANY member imagines it crashing, its deficit is the WORST member's, its
+    survival the SHORTEST. One net cannot say "I don't know" -- but where
+    imagination leaves the training manifold, independently-trained members
+    disagree, and under worst-member ranking a hallucinated thermal only helps
+    a candidate if EVERY member dreams it (t3 finding: a single net invented
+    +3.4 m/s of lift in dead air and the planner flew 1 km off-corridor into
+    the fog chasing it). Dial-free: pessimism is in task units, no threshold
+    to calibrate."""
+    crashed = np.any([m.crashed for m in per_member], axis=0)
+    deficit = np.max([m.deficit for m in per_member], axis=0)
+    est_time = np.mean([m.est_time for m in per_member], axis=0)
+    t_crash = np.min([m.t_crash for m in per_member], axis=0)
+    return RolloutScores(crashed=crashed, deficit=deficit, est_time=est_time, t_crash=t_crash)
 
 
 # --- the CEM search --------------------------------------------------------------------
@@ -269,7 +296,7 @@ class Plan:
 
 
 def cem_plan(
-    ck: Checkpoint,
+    ensemble: list[Checkpoint],
     panel0: FloatArr,
     goal: Goal,
     polar: GlidePolar,
@@ -306,17 +333,40 @@ def cem_plan(
     std = np.tile(np.array([cfg.init_std, cfg.pitch_init_std]), (cfg.n_segments, 1))
     floor = np.array([cfg.std_floor, cfg.pitch_std_floor])
     best = Plan(segments=mean, mean=mean, imagined=np.empty(0))  # overwritten below
+    # the pilot's primitive repertoire, injected as standing candidates every
+    # round: sustained circle left / circle right (min-sink-ish speed, the
+    # radius that fits a core) and run-straight-at-trim. Own-body maneuvers,
+    # zero field knowledge. Without them, sustained thermalling is a needle in
+    # 12-dim search space: a warm-started mean that encodes ANY drift keeps
+    # sampling drift, and "hold this bank for 30 s" never gets drawn (t3
+    # flying: the planner brushed real lift again and again but never once
+    # sampled the clean circle that would have kept it there).
+    archetypes = np.array(
+        [
+            [[+0.70, 19.0]] * cfg.n_segments,  # circle right, slow
+            [[-0.70, 19.0]] * cfg.n_segments,  # circle left, slow
+            [[0.0, polar_speed]] * cfg.n_segments,  # run straight at trim
+        ]
+    )
     for _ in range(cfg.iterations):
         cands = rng.normal(mean, std, size=(cfg.population, cfg.n_segments, 2))
         cands[0] = mean  # keep the incumbent in the running
+        cands[1 : 1 + len(archetypes)] = archetypes
         cands[..., 0] = np.clip(cands[..., 0], -cfg.max_bank_cmd, cfg.max_bank_cmd)
         cands[..., 1] = np.clip(cands[..., 1], cfg.pitch_lo, cfg.pitch_hi)
         ticks = expand_segments(cands, cfg.ticks_per_segment)
-        imagined = imagine(ck, panel0, ticks[..., 0], ticks[..., 1])
+        ck = ensemble[0]  # member 0 is THE model (keystone-graded); extras vote
         ground_z = float(ck.stats.panel_lo[ck.sensor_names.index("z")])
+        dreams = [imagine(m, panel0, ticks[..., 0], ticks[..., 1]) for m in ensemble]
+        imagined = dreams[0]
         order = rank(
-            score_rollouts(
-                imagined, ck.sensor_names, goal, scored_polar, ck.dt, ground_z, cfg.reserve_height
+            combine_scores(
+                [
+                    score_rollouts(
+                        d, ck.sensor_names, goal, scored_polar, ck.dt, ground_z, cfg.reserve_height
+                    )
+                    for d in dreams
+                ]
             )
         )
         elites = cands[order[: cfg.n_elites]]
@@ -350,7 +400,7 @@ class Flight:
 
 def fly_to_goal(
     sim: Simulation,
-    ck: Checkpoint,
+    ensemble: list[Checkpoint],
     goal: Goal,
     cfg: PlannerConfig,
     rng: np.random.Generator,
@@ -371,8 +421,8 @@ def fly_to_goal(
     max_ticks = int(max_seconds / sim.dt)
     while ticks < max_ticks:
         panel_now = sim.sense()
-        panel0 = np.array([panel_now[name] for name in ck.sensor_names])
-        plan = cem_plan(ck, panel0, goal, polar, cfg, rng, warm_mean=warm)
+        panel0 = np.array([panel_now[name] for name in ensemble[0].sensor_names])
+        plan = cem_plan(ensemble, panel0, goal, polar, cfg, rng, warm_mean=warm)
         flight.plans.append(plan)
         warm = plan.mean
         cmd_ticks = expand_segments(plan.segments[None], cfg.ticks_per_segment)[0]
@@ -393,7 +443,7 @@ def fly_to_goal(
 
 # --- the demo: mechanics on the one-thermal world ---------------------------------------
 def main() -> None:
-    """THE t3 task: from 40 m -- takeoff height -- reach a goal 1.6 km away on
+    """THE t3 task: from 60 m -- winch-launch height -- reach a goal 1.6 km on
     the far side of the sink band. Verified unreachable without climbing:
     NINE hand-crafted no-climb routes (straight, five around-the-band
     variants, through-B, and around-then-refuel-through-B) all crash in the
@@ -401,12 +451,16 @@ def main() -> None:
     A, commit across the band, top up at B if needed, final-glide in.
     Nothing in the cost says any of that -- if it happens, it emerged."""
     here = Path(__file__).resolve().parent
-    ck = load_checkpoint(here / "data" / "model_full.pt")
+    ensemble = [
+        load_checkpoint(p)
+        for p in sorted((here / "data").glob("model_full*.pt"))  # full, full_s1, full_s2
+    ]
     glider, air = make_world()
     polar = best_glide(glider)
+    print(f"ensemble: {len(ensemble)} member(s)")
     print(f"own polar: best glide {polar.v_best_glide:.1f} m/s at L/D {polar.glide_ratio:.1f}")
 
-    start = GliderState(x=-80.0, y=0.0, z=40.0, heading=0.0, airspeed=24.0, bank=0.0)
+    start = GliderState(x=-80.0, y=0.0, z=60.0, heading=0.0, airspeed=24.0, bank=0.0)
     goal = Goal(x=1500.0, y=0.0)
     reach = (start.z + (start.airspeed**2 - polar.v_best_glide**2) / 19.62) * polar.glide_ratio
     need = float(np.hypot(goal.x - start.x, goal.y - start.y))
@@ -414,7 +468,7 @@ def main() -> None:
 
     sim = Simulation(glider, air, start)
     flight = fly_to_goal(
-        sim, ck, goal, PlannerConfig(), np.random.default_rng(0), max_seconds=360.0
+        sim, ensemble, goal, PlannerConfig(), np.random.default_rng(0), max_seconds=360.0
     )
 
     s = sim.state

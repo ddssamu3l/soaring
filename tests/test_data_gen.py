@@ -49,15 +49,24 @@ def test_shapes_line_up_and_values_are_finite() -> None:
 
 
 def test_commands_are_piecewise_constant_and_bounded() -> None:
-    # held blocks (so consequences complete), both turn directions, bounded.
+    # held blocks (so consequences complete), both turn directions, bounded,
+    # and a MIXTURE of hold lengths: short jitter AND long sustained maneuvers
+    # (a dataset with no sustained circles cannot teach a model what circling
+    # does -- the t3 planner found that out the hard way).
     rng = np.random.default_rng(0)
-    banks, speeds = sample_commands(rng, n_steps=20, hold_steps=5)
-    assert banks.shape == speeds.shape == (20,)
+    banks, speeds = sample_commands(rng, n_steps=2000, hold_steps=10)
+    assert banks.shape == speeds.shape == (2000,)
     assert np.all(np.abs(banks) <= np.radians(50.0))
-    for block in banks.reshape(4, 5):
-        assert np.all(block == block[0])  # constant within each block
-    for block in speeds.reshape(4, 5):
-        assert np.all(block == block[0])
+    assert np.all((speeds >= 15.0) & (speeds <= 35.0))
+    # piecewise constant: bank and speed change at the SAME (few) boundaries
+    changes = np.nonzero(np.diff(banks) != 0)[0]
+    assert 5 < len(changes) < 2000 // 10  # far fewer changes than ticks
+    assert set(np.nonzero(np.diff(speeds) != 0)[0]) <= set(changes) | set(
+        np.nonzero(np.diff(speeds) != 0)[0]
+    )
+    holds = np.diff(np.concatenate([[0], changes + 1, [2000]]))
+    assert holds.min() >= 10  # nothing shorter than the base hold
+    assert holds.max() >= 50  # ...and real sustained maneuvers exist (5 s+)
 
 
 # --- determinism (a dataset you can't reproduce is one you can't debug) -----
