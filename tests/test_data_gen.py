@@ -147,9 +147,9 @@ def test_world_is_decision_forcing() -> None:
     # work with a perfect min-speed circle is a core the planner cannot use
     assert float(air.updraft(70.0, 0.0)) > 2.0
     assert float(air.updraft(1000.0, 0.0)) > 2.5  # B: a real top-up
-    for y in (-250.0, 0.0, 250.0):
-        assert float(air.updraft(500.0, y)) < -2.5  # the band sinks HARD everywhere across
-    assert abs(float(air.updraft(500.0, 900.0))) < 0.3  # ...but ends; air calms outside
+    for y in (-500.0, -250.0, 0.0, 250.0, 500.0):
+        assert float(air.updraft(500.0, y)) < -2.5  # the WALL sinks hard all the way across
+    assert abs(float(air.updraft(500.0, 1200.0))) < 0.3  # ...but ends; air calms outside
 
 
 def test_random_starts_cover_the_task_corridor() -> None:

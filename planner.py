@@ -24,8 +24,12 @@ Two numbers are anchored, not tuned:
   * candidates hold bank commands inside +/-MAX_BANK_CMD, the exact support of
     the training data -- a planner that samples outside it would be optimizing
     into regions where the model has never been graded (hallucination-chasing);
-  * the horizon is 15 s because that is precisely how deep the keystone plot
-    certified the imagination (position error ~15 m at 15 s; beyond is faith).
+  * the horizon is 30 s -- the measured edge of trustworthy imagination (the
+    keystone probe: sigma 0.87 at 30 s, ~1.0 by 45 s = persistence-useless).
+    15 s was fully certified but cannot CONTAIN THE COMMITMENT: the sink-band
+    crossing takes ~50 s, and a horizon that can't see a commitment's cost
+    cannot weigh it -- 30 s sees most of the band; a margined tail covers the
+    rest. Planning deeper than ~30 s would be planning through mush.
 
 THE COST CONTAINS NO SOARING ADVICE -- that is the experiment. Rollouts are
 ranked lexicographically by (crashed, glide-deficit, estimated total time):
@@ -91,8 +95,8 @@ class PlannerConfig:
     horizon n_segments * ticks_per_segment = 150 ticks = the keystone's 15 s.
     Everything else is a starting guess, tuned by watching it fly."""
 
-    n_segments: int = 5  # decision blocks per candidate (each block = bank + speed)
-    ticks_per_segment: int = 30  # 3 s each -- roughly a 50-60 degree arc of turn
+    n_segments: int = 6  # decision blocks per candidate (each block = bank + speed)
+    ticks_per_segment: int = 50  # 5 s each: one block sustains half a thermalling circle
     population: int = 512  # candidates per CEM iteration
     n_elites: int = 64  # top-scoring candidates that refit the Gaussian
     iterations: int = 4  # sample -> rank -> refit rounds per replan
@@ -104,6 +108,15 @@ class PlannerConfig:
     max_bank_cmd: float = MAX_BANK_CMD  # the training-support clip (+/-50 deg)
     pitch_lo: float = 17.0  # speed-command clip: inside training support (15-35),
     pitch_hi: float = 32.0  # with a margin off the sampled extremes
+    reserve_height: float = 50.0  # the pilot's arrival reserve (m): the tail only
+    #   counts energy height ABOVE this -- plan to arrive with altitude in hand,
+    #   not at ground level. Own-body arithmetic, zero field knowledge.
+    glide_margin: float = 0.6  # the pilot's pessimism dial: the terminal value uses
+    #   glide_ratio * margin, so "goal is makeable" needs real reserve. Without it
+    #   the planner flies zero-margin final glides that sit exactly at the deficit-0
+    #   boundary, where +/-10 m of imagination noise flips the verdict (it did: it
+    #   raced at the band at 32 m/s on dreams that ended precisely at 'just enough').
+    #   Own-body arithmetic (a MacCready-style setting), zero field knowledge.
 
     @property
     def horizon(self) -> int:
@@ -168,6 +181,7 @@ def score_rollouts(
     polar: GlidePolar,
     dt: float,
     ground_z: float = 0.0,
+    reserve_height: float = 0.0,
 ) -> RolloutScores:
     """Grade (N, H+1, 9) imagined futures against the task -- nothing else.
 
@@ -204,7 +218,8 @@ def score_rollouts(
     z_end = imagined[:, horizon, zc]
     v_end = imagined[:, horizon, vc]
     energy_height = np.maximum(z_end + (v_end**2 - polar.v_best_glide**2) / (2.0 * G), 0.0)
-    deficit = np.maximum(remaining - energy_height * polar.glide_ratio, 0.0)
+    usable_height = np.maximum(energy_height - reserve_height, 0.0)
+    deficit = np.maximum(remaining - usable_height * polar.glide_ratio, 0.0)
     est_time = horizon * dt + remaining / polar.v_best_glide
 
     # arrived futures: nothing missing, their time is the actual arrival time
@@ -277,6 +292,12 @@ def cem_plan(
     the warm start.
     """
     polar_speed = polar.v_best_glide
+    # the terminal value flies the tail on a DEGRADED polar (the safety margin);
+    # the imagined horizon itself stays honest -- margin applies only to the
+    # beyond-horizon arithmetic, not to the model's dynamics
+    scored_polar = GlidePolar(
+        v_best_glide=polar.v_best_glide, glide_ratio=polar.glide_ratio * cfg.glide_margin
+    )
     if warm_mean is None:
         mean = np.zeros((cfg.n_segments, 2))
         mean[:, 1] = polar_speed  # neutral prior: wings level at trim
@@ -293,7 +314,11 @@ def cem_plan(
         ticks = expand_segments(cands, cfg.ticks_per_segment)
         imagined = imagine(ck, panel0, ticks[..., 0], ticks[..., 1])
         ground_z = float(ck.stats.panel_lo[ck.sensor_names.index("z")])
-        order = rank(score_rollouts(imagined, ck.sensor_names, goal, polar, ck.dt, ground_z))
+        order = rank(
+            score_rollouts(
+                imagined, ck.sensor_names, goal, scored_polar, ck.dt, ground_z, cfg.reserve_height
+            )
+        )
         elites = cands[order[: cfg.n_elites]]
         mean = elites.mean(axis=0)
         std = np.maximum(elites.std(axis=0), floor)

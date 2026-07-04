@@ -92,13 +92,17 @@ def make_world() -> tuple[Glider, ThermalMap]:
             Thermal(x0=0.0, y0=0.0, w_peak=4.0, radius=110.0),  # A: the home climb
             #   (radius 110: real thermal scale, and a circle at sane speeds
             #    FITS inside -- at r=60 only a perfect min-speed circle could)
-            # the sink band: three overlapping bowls spanning y ~ -450..450,
+            # the sink WALL: five overlapping bowls spanning y ~ -700..700,
             # strong enough that no non-climbing route survives it (verified
-            # empirically at the demo spawn; the fringes of A and B feed any
-            # straight line ~50 m of free energy, and the band must beat that)
+            # empirically at the demo spawn: straight, around-the-end and
+            # refuel-through-B variants all crash) and long enough that
+            # around-the-end is STRICTLY dominated -- the world presents one
+            # clear commitment, not a maze of near-viable cheats
+            Thermal(x0=500.0, y0=-500.0, w_peak=-3.0, radius=200.0),
             Thermal(x0=500.0, y0=-250.0, w_peak=-3.0, radius=200.0),
             Thermal(x0=500.0, y0=0.0, w_peak=-3.0, radius=200.0),
             Thermal(x0=500.0, y0=250.0, w_peak=-3.0, radius=200.0),
+            Thermal(x0=500.0, y0=500.0, w_peak=-3.0, radius=200.0),
             Thermal(x0=1000.0, y0=0.0, w_peak=3.5, radius=90.0),  # B: the far top-up
         ]
     )

@@ -217,6 +217,17 @@ def test_score_rollouts_deficit_prices_energy_height_not_just_altitude() -> None
     assert scores.deficit[1] == pytest.approx(3000.0 - energy_height * 30.0, rel=1e-3)
 
 
+def test_score_rollouts_reserve_height_shrinks_usable_energy() -> None:
+    """With an arrival reserve, only energy ABOVE the reserve counts toward
+    reach -- the tail plans to arrive with altitude in hand, not at 0 m."""
+    goal = Goal(x=3000.0, y=0.0, radius=10.0)
+    future = _future([[0, 0, 100, 25], [0, 0, 100, 25]])
+    plain = score_rollouts(future[None], NAMES, goal, POLAR, 0.1)
+    reserved = score_rollouts(future[None], NAMES, goal, POLAR, 0.1, reserve_height=40.0)
+    assert plain.deficit[0] == pytest.approx(3000.0 - 100.0 * 30.0)
+    assert reserved.deficit[0] == pytest.approx(3000.0 - 60.0 * 30.0)
+
+
 def test_score_rollouts_arrival_before_ground_contact_counts_as_arrived() -> None:
     """Reaching the goal and THEN touching imagined ground is an arrival --
     the flight ends at the goal; whatever the imagination does after is moot."""
@@ -262,6 +273,16 @@ def test_cem_plan_trace_records_the_real_search(setup) -> None:
         elites = it.candidates[it.order[: TINY.n_elites]]
         assert np.allclose(it.mean, elites.mean(axis=0))  # the refit, exactly
         assert it.imagined_xy.shape == (TINY.population, TINY.horizon + 1, 2)
+
+
+def test_config_anchors_hold() -> None:
+    """The two anchored dials: the default horizon is the certified 30 s (any
+    deeper is past the measured edge of trustworthy imagination), and the
+    glide margin is a real safety factor in (0, 1)."""
+    cfg = PlannerConfig()
+    assert cfg.horizon * 0.1 == pytest.approx(30.0)
+    assert 0.0 < cfg.glide_margin < 1.0
+    assert cfg.reserve_height > 0.0  # plan to ARRIVE with altitude, not to graze the fence
 
 
 def test_cem_plan_warm_start_keeps_the_incumbent_alive(setup) -> None:
