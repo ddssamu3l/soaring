@@ -92,7 +92,8 @@ class Goal:
 @dataclass(frozen=True)
 class PlannerConfig:
     """CEM/MPC dials. Anchored: max_bank_cmd (training support) and the total
-    horizon n_segments * ticks_per_segment = 150 ticks = the keystone's 15 s.
+    horizon n_segments * ticks_per_segment = 300 ticks = the probe-certified
+    30 s (see the module docstring; pinned by test_config_anchors_hold).
     Everything else is a starting guess, tuned by watching it fly."""
 
     n_segments: int = 6  # decision blocks per candidate (each block = bank + speed)
@@ -413,7 +414,7 @@ def fly_to_goal(
     the winner -> repeat. The planner sees ONLY sense() panels and its own
     imagination; the Simulation holds the omniscient truth and grades arrival.
 
-    Warm start: the refit mean is reused unshifted -- 1 s into a 3 s segment it
+    Warm start: the refit mean is reused unshifted -- 1 s into a 5 s segment it
     is slightly stale, but the next CEM re-optimizes from it anyway (logged
     approximation; revisit only if the planner visibly dithers at boundaries).
     """
@@ -465,9 +466,12 @@ def main() -> None:
 
     start = GliderState(x=-80.0, y=0.0, z=60.0, heading=0.0, airspeed=24.0, bank=0.0)
     goal = Goal(x=1500.0, y=0.0)
-    reach = (start.z + (start.airspeed**2 - polar.v_best_glide**2) / 19.62) * polar.glide_ratio
+    energy_height = start.z + (start.airspeed**2 - polar.v_best_glide**2) / (2.0 * G)
+    reach = energy_height * polar.glide_ratio
     need = float(np.hypot(goal.x - start.x, goal.y - start.y))
-    print(f"to goal: {need:.0f} m; still-air reach from start: {reach:.0f} m -> MUST climb")
+    print(f"to goal: {need:.0f} m; still-air reach from start: {reach:.0f} m")
+    print("  (reach ignores the sink wall; MUST-climb is certified by the 9-route")
+    print("   no-climb suite in test_data_gen, not by this ratio)")
 
     sim = Simulation(glider, air, start)
     flight = fly_to_goal(
