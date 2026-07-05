@@ -80,18 +80,41 @@ class Result:
 ReactorRun = Callable[[Trial, ReactiveConfig], Result]
 
 
-def sample_trials(rng: np.random.Generator, n: int) -> list[Trial]:
+def sample_trials(
+    rng: np.random.Generator,
+    n: int,
+    polar: GlidePolar,
+    pcfg: PlannerConfig,
+    must_climb_frac: float = 0.5,
+) -> list[Trial]:
     """n random (start, goal) tasks. Starts reuse data_gen.random_start (the
     training envelope -- same sky the model learned); goals are uniform in the
-    goal box, rejection-sampled to be at least MIN_DIST out."""
-    trials: list[Trial] = []
-    while len(trials) < n:
+    goal box, rejection-sampled to be at least MIN_DIST out.
+
+    STRATIFIED on purpose: must_climb_frac of the tasks start with a positive
+    glide deficit (unreachable by still-air arithmetic -- the decision-forcing
+    tasks the experiment exists for). Unstratified sampling drowns the signal:
+    a first tuning run came back with blind-glide at 12/12 arrivals, i.e. the
+    random task mix had degenerated to final-glide practice. Oversampling hard
+    tasks biases NEITHER agent -- both fly the identical trial list -- it just
+    spends the trial budget where the two can differ."""
+    need_hard = round(n * must_climb_frac)
+    hard: list[Trial] = []
+    easy: list[Trial] = []
+    for _ in range(1000 * n):
+        if len(hard) + len(easy) == n:
+            break
         start = random_start(rng)
         goal = Goal(x=float(rng.uniform(*GOAL_X)), y=float(rng.uniform(*GOAL_Y)))
         if math.hypot(start.x - goal.x, start.y - goal.y) < MIN_DIST:
             continue
-        trials.append(Trial(start=start, goal=goal))
-    return trials
+        trial = Trial(start=start, goal=goal)
+        bucket = hard if start_deficit(trial, polar, pcfg) > 0.0 else easy
+        quota = need_hard if bucket is hard else n - need_hard
+        if len(bucket) < quota:
+            bucket.append(trial)
+    assert len(hard) + len(easy) == n, "trial sampler could not fill its strata"
+    return hard + easy
 
 
 def start_deficit(trial: Trial, polar: GlidePolar, pcfg: PlannerConfig) -> float:
@@ -182,13 +205,18 @@ def tune_reactor(
     return grid[best_i], rows
 
 
-# Winners of `experiment.py --tune` (the grid above, 12 tuning trials on seed
-# 7, 240 s cap) -- pinned so the eval is reproducible without re-tuning.
-# Re-run --tune and re-pin after any world or reactor change.
+# Winners of `experiment.py --tune` (the grid above; 12 stratified tuning
+# trials on seed 7, 240 s cap; run 2026-07-04) -- pinned so the eval is
+# reproducible without re-tuning. Re-run --tune and re-pin after any world or
+# reactor change. Tuning-run headlines, for context: b0 9/12 (blind glide is
+# no strawman -- the margined deficit arithmetic is pessimistic on purpose, so
+# some "must-climb" tasks are still glidable on the TRUE polar), b1 3/12
+# (reflexes without arithmetic park in thermals -- WORSE than blind), b2 10/12
+# (the real opponent; both b1 and b2 chose the v_dash=28 speed-to-fly).
 TUNED: dict[str, ReactiveConfig] = {
     "b0": ReactiveConfig(variant="b0"),
-    "b1": ReactiveConfig(variant="b1"),
-    "b2": ReactiveConfig(variant="b2"),
+    "b1": ReactiveConfig(variant="b1", vario_enter=0.6, exit_patience=4.0, k_asym=0.5, v_dash=28.0),
+    "b2": ReactiveConfig(variant="b2", vario_enter=1.0, exit_patience=4.0, k_asym=1.5, v_dash=28.0),
 }
 
 
@@ -328,7 +356,7 @@ def main() -> None:
 
     if args.tune:
         # tuning trials come from their OWN seed: the eval set stays untouched
-        trials = sample_trials(np.random.default_rng(args.tune_seed), args.tune_n)
+        trials = sample_trials(np.random.default_rng(args.tune_seed), args.tune_n, polar, pcfg)
         for variant in ("b0", "b1", "b2"):
             grid = reactor_grid(variant)
 
@@ -351,7 +379,7 @@ def main() -> None:
     ensemble = [load_checkpoint(p) for p in sorted((here / "data").glob("model_full*.pt"))]
     assert ensemble, "no data/model_full*.pt -- run train.py first"
     assert tuple(ensemble[0].sensor_names) == SENSOR_NAMES
-    trials = sample_trials(np.random.default_rng(args.eval_seed), args.n)
+    trials = sample_trials(np.random.default_rng(args.eval_seed), args.n, polar, pcfg)
 
     results: dict[str, list[Result]] = {"planner": [], "b0": [], "b1": [], "b2": []}
     for i, trial in enumerate(trials):

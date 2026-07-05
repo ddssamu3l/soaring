@@ -32,15 +32,21 @@ from planner import Goal, PlannerConfig, best_glide
 from reactive import ReactiveConfig
 
 
-def test_sample_trials_is_reproducible_and_in_bounds() -> None:
-    a = sample_trials(np.random.default_rng(0), 20)
-    b = sample_trials(np.random.default_rng(0), 20)
+def test_sample_trials_is_reproducible_stratified_and_in_bounds() -> None:
+    glider, _ = make_world()
+    polar = best_glide(glider)
+    pcfg = PlannerConfig()
+    a = sample_trials(np.random.default_rng(0), 20, polar, pcfg)
+    b = sample_trials(np.random.default_rng(0), 20, polar, pcfg)
     assert a == b  # the eval set is pinned by its seed
     for t in a:
         assert GOAL_X[0] <= t.goal.x <= GOAL_X[1]
         assert GOAL_Y[0] <= t.goal.y <= GOAL_Y[1]
         assert math.hypot(t.start.x - t.goal.x, t.start.y - t.goal.y) >= MIN_DIST
         assert 30.0 <= t.start.z <= 600.0  # data_gen's training envelope
+    # the stratification quota: half the tasks are decision-forcing
+    hard = sum(start_deficit(t, polar, pcfg) > 0.0 for t in a)
+    assert hard == 10
 
 
 def test_start_deficit_flags_the_decision_forcing_tasks() -> None:
@@ -60,7 +66,8 @@ def test_start_deficit_flags_the_decision_forcing_tasks() -> None:
 
 
 def test_tune_reactor_picks_most_arrivals_then_fastest() -> None:
-    trials = sample_trials(np.random.default_rng(1), 3)
+    glider, _ = make_world()
+    trials = sample_trials(np.random.default_rng(1), 3, best_glide(glider), PlannerConfig())
     grid = [ReactiveConfig(variant="b1", vario_enter=e) for e in (0.1, 0.2, 0.3)]
 
     def stub(trial: Trial, cfg: ReactiveConfig) -> Result:
@@ -106,7 +113,8 @@ def test_run_reactor_flies_a_fresh_world_per_trial() -> None:
 
 
 def test_save_results_round_trips_the_eval(tmp_path: Path) -> None:
-    trials = sample_trials(np.random.default_rng(2), 4)
+    glider, _ = make_world()
+    trials = sample_trials(np.random.default_rng(2), 4, best_glide(glider), PlannerConfig())
     results = {
         "b0": [Result("crashed", 12.5, 100.0, -50.0, 0.0) for _ in trials],
         "b2": [Result("arrived", 99.0, 800.0, 10.0, 55.0) for _ in trials],
