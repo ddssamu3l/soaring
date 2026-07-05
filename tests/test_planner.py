@@ -90,6 +90,15 @@ def test_best_glide_is_the_polar_optimum_and_matches_the_airframe_class() -> Non
     assert 25.0 < polar.glide_ratio < 40.0
 
 
+def test_best_glide_speed_is_commandable_within_the_planning_support() -> None:
+    """Both agents (planner archetype, reactor glide mode) COMMAND v_best_glide;
+    if it ever drifted outside the pitch clip the 'run straight at trim'
+    primitive would silently become a different maneuver."""
+    cfg = PlannerConfig()
+    polar = best_glide(Glider())
+    assert cfg.pitch_lo <= polar.v_best_glide <= cfg.pitch_hi
+
+
 # --- candidate expansion ---------------------------------------------------------------
 def test_expand_segments_holds_each_command_for_its_block() -> None:
     segments = np.array([[0.1, -0.2, 0.3], [0.0, 0.5, -0.5]])

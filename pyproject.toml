@@ -30,9 +30,12 @@ strict = true
 files = [
     "card.py",
     "data_gen.py",
+    "experiment.py",
     "fly.py",
     "glider_sim.py",
     "keystone.py",
+    "planner.py",
+    "reactive.py",
     "report.py",
     "train.py",
     "viewport",

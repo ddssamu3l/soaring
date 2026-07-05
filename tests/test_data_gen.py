@@ -61,9 +61,7 @@ def test_commands_are_piecewise_constant_and_bounded() -> None:
     # piecewise constant: bank and speed change at the SAME (few) boundaries
     changes = np.nonzero(np.diff(banks) != 0)[0]
     assert 5 < len(changes) < 2000 // 10  # far fewer changes than ticks
-    assert set(np.nonzero(np.diff(speeds) != 0)[0]) <= set(changes) | set(
-        np.nonzero(np.diff(speeds) != 0)[0]
-    )
+    assert set(np.nonzero(np.diff(speeds) != 0)[0]) <= set(changes)
     holds = np.diff(np.concatenate([[0], changes + 1, [2000]]))
     assert holds.min() >= 10  # nothing shorter than the base hold
     assert holds.max() >= 50  # ...and real sustained maneuvers exist (5 s+)

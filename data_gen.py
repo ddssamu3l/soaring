@@ -133,7 +133,7 @@ def sample_commands(
 ) -> tuple[FloatArray, FloatArray]:
     """Piecewise-constant stick schedules with a MIXTURE of hold lengths: each
     block draws one (bank_cmd, pitch_cmd) and holds it for hold_steps ticks
-    (half the blocks) or 5-15x that (the other half). The long holds are
+    (70% of blocks) or 5-15x that (the other 30%). The long holds are
     load-bearing for t3: with 1 s holds only, 600 episodes contain not one
     sustained circle -- the exact maneuver a thermalling planner must imagine.
     A model is only gradeable on trajectories the data contains, and free-
