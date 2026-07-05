@@ -41,7 +41,7 @@
     {
       "id": "t4",
       "title": "Compare to a reactive baseline \u2014 THE EXPERIMENT",
-      "status": "pending",
+      "status": "active",
       "deps": [
         "t3"
       ],
