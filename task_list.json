@@ -41,12 +41,12 @@
     {
       "id": "t4",
       "title": "Compare to a reactive baseline \u2014 THE EXPERIMENT",
-      "status": "active",
+      "status": "done",
       "deps": [
         "t3"
       ],
       "files": [],
-      "commit": null,
+      "commit": "15f38edd5fe1ed32b6e5f068a0c43d242c09b994",
       "notes": "Reactive 'turn toward lift' vs the planner, same task. Headline: DOES PREDICTING BEAT REACTING? \u2014 the organizing question, as a number. Visible even on a fixed field: the reactor parks in thermal A or glides blindly; the planner commits to the A->B->goal route. (When airspeed becomes a control \u2014 a v2 upgrade \u2014 add MacCready speed-to-fly as the analytical optimum to score both against.)"
     },
     {
